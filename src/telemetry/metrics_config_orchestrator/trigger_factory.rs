@@ -14,7 +14,13 @@
 
 use anyhow::{anyhow, Context};
 use protobuf::{well_known_types::duration::Duration as DurationProto, Message};
-use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
+use sdv_telemetry_expr::{
+    node::Node, node_error::NodeEvaluationError, node_value_type::NodeValueType,
+    node_value_type::OperatorProtoExtension,
+};
+use sdv_telemetry_proto_rust::expression::{
+    combination_node::Operator as OperatorProto, combination_node::RelationalOperator,
+};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionTypeAllChanges, conditional_trigger::ConditionTypeFallingEdge,
     conditional_trigger::ConditionTypeRisingEdge,
@@ -27,7 +33,9 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 
-use super::trigger::conditional::{ConditionType, ConditionalTrigger, EdgeOptions};
+use super::trigger::conditional::{
+    ConditionType, ConditionalTrigger, EdgeOptions, FirstValuePolicy,
+};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
 use crate::metrics_config_orchestrator::{
@@ -97,8 +105,10 @@ pub(crate) enum TriggerFactoryError {
     UnspecifiedTriggerType,
     #[error("Edge options ({edge_options}) are invalid: {error:#}")]
     InvalidEdgeOptions { edge_options: EdgeOptionsProto, error: anyhow::Error },
-    #[error("Condition {condition_type:?} is invalid: {error:#}")]
-    InvalidConditionTypeProto { condition_type: ConditionTypeProto, error: anyhow::Error },
+    #[error("Condition type is invalid: {error:#}")]
+    InvalidConditionTypeProto { error: anyhow::Error },
+    #[error("initialize_node_index has type which is not compatible with type of selector_node_index: {error:#}")]
+    IncompatibleNodeTypes { error: NodeEvaluationError },
 }
 
 pub(crate) struct TriggerFactoryImpl {
@@ -173,15 +183,14 @@ impl TriggerFactory for TriggerFactoryImpl {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
 
                 let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
-                let selector_expression = context
-                    .expression_nodes
-                    .get(selector_node_index as usize)
-                    .ok_or_else(|| TriggerFactoryError::IncorrectNodeIndex {
-                        node_index: selector_node_index,
-                    })?;
+                let selector_expression =
+                    Self::get_node(selector_node_index, context.expression_nodes)?;
+
                 let condition_type = Self::get_condition_type(
                     conditional_trigger,
-                    context.node_types[selector_node_index as usize].as_ref(),
+                    selector_node_index,
+                    context.node_types,
+                    Some(context.expression_nodes),
                 )?;
                 let triggers = conditional_trigger
                     .trigger_names
@@ -192,7 +201,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     trigger_name,
                     condition_type,
                     metrics_config_uuid,
-                    Arc::clone(selector_expression),
+                    selector_expression,
                     triggers,
                     Arc::clone(&self.node_evaluation_context_factory),
                     Arc::clone(&self.status_reporter),
@@ -242,11 +251,14 @@ impl TriggerFactory for TriggerFactoryImpl {
             }
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
+
                 let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
-                let value_type = context.node_types.get(selector_node_index as usize).ok_or(
-                    TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
+                Self::get_condition_type(
+                    conditional_trigger,
+                    selector_node_index,
+                    context.node_types,
+                    None,
                 )?;
-                Self::get_condition_type(conditional_trigger, value_type.as_ref())?;
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
         };
@@ -315,54 +327,86 @@ impl TriggerFactoryImpl {
 
     fn get_condition_type(
         conditional_trigger_proto: &ConditionalTriggerProto,
-        value_type: Option<&NodeValueType>,
+        selector_node_index: u32,
+        node_value_types: &[Option<NodeValueType>],
+        expression_nodes: Option<&[Arc<Node>]>,
     ) -> Result<ConditionType, TriggerFactoryError> {
         let proto_condition_type = conditional_trigger_proto
             .condition_type
             .as_ref()
             .ok_or_else(|| TriggerFactoryError::UnspecifiedConditionTypeProto)?;
 
+        let value_type = node_value_types.get(selector_node_index as usize).ok_or_else(|| {
+            TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index }
+        })?;
+
         let condition_type = match proto_condition_type {
             ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
                 rising_options,
                 fire_initial,
+                initialize_node_index,
                 special_fields: _,
             }) => {
-                Self::validate_params(*fire_initial, rising_options, proto_condition_type)?;
+                let first_value_policy = Self::get_first_value_policy(
+                    Some(rising_options),
+                    None,
+                    *fire_initial,
+                    initialize_node_index.as_ref(),
+                    selector_node_index,
+                    node_value_types,
+                    expression_nodes,
+                )?;
                 ConditionType::RisingEdge {
                     rising_options: Self::get_edge_options(rising_options)?,
-                    fire_initial: *fire_initial,
+                    first_value_policy,
                 }
             }
             ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
                 falling_options,
                 fire_initial,
+                initialize_node_index,
                 special_fields: _,
             }) => {
-                Self::validate_params(*fire_initial, falling_options, proto_condition_type)?;
+                let first_value_policy = Self::get_first_value_policy(
+                    None,
+                    Some(falling_options),
+                    *fire_initial,
+                    initialize_node_index.as_ref(),
+                    selector_node_index,
+                    node_value_types,
+                    expression_nodes,
+                )?;
                 ConditionType::FallingEdge {
                     falling_options: Self::get_edge_options(falling_options)?,
-                    fire_initial: *fire_initial,
+                    first_value_policy,
                 }
             }
             ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
                 rising_options,
                 falling_options,
                 fire_initial,
+                initialize_node_index,
                 special_fields: _,
             }) => {
-                Self::validate_params(*fire_initial, rising_options, proto_condition_type)?;
-                Self::validate_params(*fire_initial, falling_options, proto_condition_type)?;
-
+                let first_value_policy = Self::get_first_value_policy(
+                    Some(rising_options),
+                    Some(falling_options),
+                    *fire_initial,
+                    initialize_node_index.as_ref(),
+                    selector_node_index,
+                    node_value_types,
+                    expression_nodes,
+                )?;
                 if Self::are_edge_options_set(rising_options)
                     || Self::are_edge_options_set(falling_options)
                 {
                     ConditionType::BothEdges {
                         rising_options: Self::get_edge_options(rising_options)?,
                         falling_options: Self::get_edge_options(falling_options)?,
+                        first_value_policy,
                     }
                 } else {
-                    ConditionType::AllChanges { fire_initial: *fire_initial }
+                    ConditionType::AllChanges { first_value_policy }
                 }
             }
             ConditionTypeProto::IsTrue(_) => ConditionType::IsTrue,
@@ -395,10 +439,105 @@ impl TriggerFactoryImpl {
         Ok(condition_type)
     }
 
+    // Validates and builds FirstValuePolicy based on the parameters provided in condition type
+    // proto. If the expression nodes are not provided, FirstValueType::CompareTo can't be
+    // constructed, and then FirstValueType::Skip is returned instead.
+    fn get_first_value_policy(
+        rising_options: Option<&EdgeOptionsProto>,
+        falling_options: Option<&EdgeOptionsProto>,
+        fire_initial: bool,
+        initialize_node_index: Option<&u32>,
+        selector_node_index: u32,
+        node_value_types: &[Option<NodeValueType>],
+        expression_nodes: Option<&[Arc<Node>]>,
+    ) -> Result<FirstValuePolicy, TriggerFactoryError> {
+        match (fire_initial, initialize_node_index) {
+            (true, Some(_)) => Err(TriggerFactoryError::InvalidConditionTypeProto {
+                error: anyhow!("Either fire_initial=true or initialize_node_index can be set"),
+            }),
+            (true, None) => {
+                // Validate that edge options are not set or set to default.
+                if [rising_options, falling_options]
+                    .into_iter()
+                    .flatten()
+                    .any(Self::are_edge_options_set)
+                {
+                    return Err(TriggerFactoryError::InvalidConditionTypeProto {
+                        error: anyhow!(
+                            "Either fire_initial=true or non-empty edge options can be set"
+                        ),
+                    });
+                }
+                Ok(FirstValuePolicy::FireTrigger)
+            }
+            (false, None) => Ok(FirstValuePolicy::Skip),
+            (false, Some(index)) => {
+                // Validate that node types of selector and initial expression are compatible with
+                // the given condition type.
+                let maybe_operator = match (rising_options, falling_options) {
+                    // ConditionType::BothEdges
+                    (Some(rising), Some(falling))
+                        if Self::are_edge_options_set(rising)
+                            || Self::are_edge_options_set(falling) =>
+                    {
+                        // Also GT and EQ (if edge options contain require_exact: true) are used,
+                        // but just LT is enough for validation.
+                        Some(OperatorProto::RelationalOperator(RelationalOperator::LT.into()))
+                    }
+                    // ConditionType::AllChanges
+                    (Some(_), Some(_)) => {
+                        Some(OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into()))
+                    }
+                    // ConditionType::RisingEdge
+                    (Some(_), None) => {
+                        Some(OperatorProto::RelationalOperator(RelationalOperator::LT.into()))
+                    }
+                    // ConditionType::FallingEdge
+                    (None, Some(_)) => {
+                        Some(OperatorProto::RelationalOperator(RelationalOperator::GT.into()))
+                    }
+                    // this should never happen as callers should provide at least some of edge
+                    // options (possibly, unset of default)
+                    (None, None) => None,
+                };
+
+                if let Some(operator) = maybe_operator {
+                    operator
+                        .get_node_value_type(
+                            node_value_types,
+                            *index as usize,
+                            selector_node_index.into(),
+                        )
+                        .map_err(|error| TriggerFactoryError::IncompatibleNodeTypes { error })?;
+                }
+
+                // Expression nodes do not exist when get_first_value_policy is called for
+                // validation purposes. We then return any policy, as the actual enum variant is
+                // irrelevant for validations.
+                Ok(match expression_nodes {
+                    None => FirstValuePolicy::Skip,
+                    Some(nodes) => {
+                        FirstValuePolicy::CompareTo { node: Self::get_node(*index, nodes)? }
+                    }
+                })
+            }
+        }
+    }
+
     fn get_selector_node_index(
         conditional_trigger_proto: &ConditionalTriggerProto,
     ) -> Result<u32, TriggerFactoryError> {
         conditional_trigger_proto.selector_node_index.ok_or(TriggerFactoryError::MissingNodeIndex)
+    }
+
+    fn get_node(
+        node_index: u32,
+        expression_nodes: &[Arc<Node>],
+    ) -> Result<Arc<Node>, TriggerFactoryError> {
+        let expression_node = expression_nodes
+            .get(node_index as usize)
+            .ok_or_else(|| TriggerFactoryError::IncorrectNodeIndex { node_index })?;
+        Ok(Arc::clone(expression_node))
     }
 
     fn get_periodic_interval(
@@ -417,20 +556,6 @@ impl TriggerFactoryImpl {
             });
         }
         Ok(interval)
-    }
-
-    fn validate_params(
-        fire_initial: bool,
-        options: &EdgeOptionsProto,
-        proto_condition_type: &ConditionTypeProto,
-    ) -> Result<(), TriggerFactoryError> {
-        if fire_initial && Self::are_edge_options_set(options) {
-            return Err(TriggerFactoryError::InvalidConditionTypeProto {
-                condition_type: proto_condition_type.clone(),
-                error: anyhow!("Either `fire_initial = true` or edge options can be set"),
-            });
-        }
-        Ok(())
     }
 
     fn verify_name_set(trigger_proto: &TriggerProto) -> Result<(), TriggerFactoryError> {
@@ -459,7 +584,7 @@ mod tests {
     use super::*;
 
     use googletest::matchers::{
-        contains_substring, eq, err, matches_pattern, ok, result_of_ref, some,
+        anything, contains_substring, eq, err, matches_pattern, ok, result_of_ref, some,
     };
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
@@ -578,6 +703,8 @@ mod tests {
     fn create_conditional_trigger_with_incorrect_node_index() -> TriggerProto {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
+        conditional_trigger.condition_type =
+            Some(ConditionTypeProto::AllChanges(Default::default()));
         conditional_trigger.selector_node_index = Some(NODE_INDEX);
         conditional_trigger.trigger_names.push(String::default());
         trigger
@@ -1005,7 +1132,7 @@ mod tests {
         let data_holder_value = data_holder.get().unwrap();
         assert_eq!(
             data_holder_value.condition_type,
-            ConditionType::AllChanges { fire_initial: false }
+            ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }
         );
         // selector_expression should match the node at index 0
         assert!(Arc::ptr_eq(&data_holder_value.selector_expression, &node_0));
@@ -1055,15 +1182,15 @@ mod tests {
 
         all_changes_default: (
             Some(ConditionTypeProto::AllChanges(Default::default())),
-            eq(&ConditionType::AllChanges { fire_initial: false }),
+            eq(&ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }),
         ),
         rising_default: (
             Some(ConditionTypeProto::RisingEdge(Default::default())),
-            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }),
         ),
         falling_default: (
             Some(ConditionTypeProto::FallingEdge(Default::default())),
-            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }),
         ),
         is_true_default: (
             Some(ConditionTypeProto::IsTrue(Default::default())),
@@ -1080,21 +1207,21 @@ mod tests {
                 falling_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::AllChanges { fire_initial: false }),
+            eq(&ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }),
         ),
         rising_with_default_options: (
             Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
                 rising_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }),
         ),
         falling_with_default_options: (
             Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
                 falling_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }),
         ),
 
         all_changes_with_rising_options: (
@@ -1109,6 +1236,7 @@ mod tests {
             eq(&ConditionType::BothEdges {
                 rising_options: EdgeOptions { min_duration: Duration::from_secs(3), require_exact: true },
                 falling_options: EdgeOptions::default(),
+                first_value_policy: FirstValuePolicy::Skip,
             }),
         ),
         all_changes_with_falling_options: (
@@ -1123,6 +1251,7 @@ mod tests {
             eq(&ConditionType::BothEdges {
                 rising_options: EdgeOptions::default(),
                 falling_options: EdgeOptions { min_duration: Duration::from_secs(3), require_exact: false },
+                first_value_policy: FirstValuePolicy::Skip,
             }),
         ),
         all_changes_with_both_options: (
@@ -1142,6 +1271,7 @@ mod tests {
             eq(&ConditionType::BothEdges {
                 rising_options: EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false },
                 falling_options: EdgeOptions { min_duration: Duration::from_secs(3), require_exact: true },
+                first_value_policy: FirstValuePolicy::Skip,
             }),
         ),
         rising_with_options: (
@@ -1153,7 +1283,7 @@ mod tests {
                 }).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false }, fire_initial: false }),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false }, first_value_policy: FirstValuePolicy::Skip }),
         ),
         falling_with_options: (
             Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
@@ -1164,19 +1294,19 @@ mod tests {
                 }).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions { min_duration: Duration::from_secs(7), require_exact: true }, fire_initial: false  }),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions { min_duration: Duration::from_secs(7), require_exact: true }, first_value_policy: FirstValuePolicy::Skip }),
         ),
         all_changes_fire_initial: (
             Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges { fire_initial: true, ..Default::default() })),
-            eq(&ConditionType::AllChanges { fire_initial: true }),
+            eq(&ConditionType::AllChanges { first_value_policy: FirstValuePolicy::FireTrigger }),
         ),
         rising_edge_fire_initial: (
             Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge { fire_initial: true, ..Default::default() })),
-            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }),
         ),
         falling_edge_fire_initial: (
             Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge { fire_initial: true, ..Default::default() })),
-            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }),
         ),
         all_changes_with_default_options_fire_initial: (
             Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
@@ -1184,14 +1314,14 @@ mod tests {
                 rising_options: Some(EdgeOptionsProto::default()).into(),
                 falling_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default() })),
-            eq(&ConditionType::AllChanges { fire_initial: true }),
+            eq(&ConditionType::AllChanges { first_value_policy: FirstValuePolicy::FireTrigger }),
         ),
         rising_edge_with_default_options_fire_initial: (
             Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
                 fire_initial: true,
                 rising_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default() })),
-            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }),
         ),
         falling_edge_with_default_options_fire_initial: (
             Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
@@ -1199,10 +1329,358 @@ mod tests {
                 falling_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }),
         ),
     );
 
+    parameterized_test!(
+        #[test]
+        create_conditional_trigger_with_initialize_node_index_success,
+
+        |condition_builder: fn(u32) -> ConditionTypeProto,
+         node_types: Vec<Option<NodeValueType>>,
+         matcher| {
+            let mut factory = create_factory();
+            let data_holder = factory.capture_conditional_trigger();
+
+            let selector_expression = Arc::new(create_node());
+            let initial_expression = Arc::new(create_node());
+            let nodes = vec![selector_expression, Arc::clone(&initial_expression)];
+
+            let (mut trigger, parent_triggers) = create_valid_conditional_trigger(
+                Arc::clone(&factory.node_evaluation_context_factory)
+            );
+
+            // `create_valid_conditional_trigger` has already set `selector_node_index` to 0th node.
+            // Now set `initialize_node_index` to 1st node.
+            trigger.mut_conditional_trigger().condition_type = Some(condition_builder(1));
+
+            let _ = factory.create_using_context_with(
+                &trigger, Some(nodes), node_types, None, parent_triggers
+            ).unwrap();
+
+            let data = data_holder.get().unwrap();
+            assert_that!(data.condition_type, matcher);
+
+            // Verify that initial expression inside the enum points to the correct node (index 1)
+            let result_expression = match &data.condition_type {
+                ConditionType::RisingEdge { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } |
+                ConditionType::FallingEdge { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } |
+                ConditionType::AllChanges { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } |
+                ConditionType::BothEdges { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } => expr,
+                _ => panic!("initial expression should be set"),
+            };
+
+            assert!(Arc::ptr_eq(result_expression, &initial_expression));
+        },
+
+        rising_edge: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(ConditionType::RisingEdge {
+                rising_options: eq(&EdgeOptions::default()),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        rising_edge_default_options: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Float), Some(NodeValueType::Int)],
+            matches_pattern!(ConditionType::RisingEdge {
+                rising_options: eq(&EdgeOptions::default()),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        rising_edge_with_options: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
+            matches_pattern!(ConditionType::RisingEdge {
+                rising_options: eq(&EdgeOptions { min_duration: Duration::from_secs(3), require_exact: false }),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        falling_edge: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Float), Some(NodeValueType::Float)],
+            matches_pattern!(ConditionType::FallingEdge {
+                falling_options: eq(&EdgeOptions::default()),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        falling_edge_default_options: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Float), Some(NodeValueType::Float)],
+            matches_pattern!(ConditionType::FallingEdge {
+                falling_options: eq(&EdgeOptions::default()),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        falling_edge_with_options: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    require_exact: true,
+                    ..Default::default()
+                }).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(ConditionType::FallingEdge {
+                falling_options: eq(&EdgeOptions { min_duration: Duration::from_secs(1), require_exact: true }),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        all_changes: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
+            matches_pattern!(ConditionType::AllChanges {
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        all_changes_default_options: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
+            matches_pattern!(ConditionType::AllChanges {
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        all_changes_with_options: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 2, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(ConditionType::BothEdges {
+                rising_options: eq(&EdgeOptions { min_duration: Duration::from_secs(2), require_exact: false }),
+                falling_options: eq(&EdgeOptions { min_duration: Duration::from_secs(3), require_exact: false }),
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+        all_changes_no_options_any_types: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            // Note that if non-default options were specified, the validation would fail with these
+            // node value types.
+            vec![Some(NodeValueType::MessageList { descriptor: None }), Some(NodeValueType::Bool)],
+            matches_pattern!(ConditionType::AllChanges {
+                // node is to be verified in the test itself
+                first_value_policy: matches_pattern!(FirstValuePolicy::CompareTo { node: anything() }),
+            })
+        ),
+    );
+
+    parameterized_test!(
+        #[test]
+        create_conditional_trigger_with_initialize_node_index_fail,
+
+        |condition_builder: fn(u32) -> ConditionTypeProto,
+         node_types: Vec<Option<NodeValueType>>,
+         error_matcher| {
+            let factory = create_factory();
+
+            // Create two generic nodes. The factory relies on the passed `node_types`
+            // context for type validation, so the actual node content is secondary here,
+            // but we provide them to satisfy the index lookups.
+            let nodes = vec![Arc::new(create_node()), Arc::new(create_node())];
+
+            let (mut trigger, parent_triggers) = create_valid_conditional_trigger(
+                Arc::clone(&factory.node_evaluation_context_factory)
+            );
+
+            // `create_valid_conditional_trigger` has already set `selector_node_index` to 0th node.
+            // Now set `initialize_node_index` to 1st node.
+            trigger.mut_conditional_trigger().condition_type = Some(condition_builder(1));
+
+            let result = factory.create_using_context_with(
+                &trigger, Some(nodes), node_types, None, parent_triggers
+            ).err().unwrap();
+
+            assert_that!(result, error_matcher);
+        },
+
+        rising_edge_with_fire_initial: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        rising_edge_default_options_with_fire_initial: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Float), Some(NodeValueType::Int)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        rising_edge_with_options_with_fire_initial: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        falling_edge_with_fire_initial: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Float), Some(NodeValueType::Float)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        falling_edge_default_options_with_fire_initial: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Float), Some(NodeValueType::Float)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        falling_edge_with_options_with_fire_initial: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    require_exact: true,
+                    ..Default::default()
+                }).into(),
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        all_changes_with_fire_initial: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        all_changes_default_options_with_fire_initial: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        all_changes_with_options_with_fire_initial: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 2, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                fire_initial: true,
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Int), Some(NodeValueType::Int)],
+            matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }),
+        ),
+        rising_edge_incompatible_types: (
+            |idx| ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Bool), Some(NodeValueType::Int)],
+            matches_pattern!(TriggerFactoryError::IncompatibleNodeTypes { .. }),
+        ),
+        falling_edge_incompatible_types: (
+            |idx| ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::Message { descriptor: None }), Some(NodeValueType::Float)],
+            matches_pattern!(TriggerFactoryError::IncompatibleNodeTypes { .. }),
+        ),
+        all_changes_with_options_incompatible_types: (
+            |idx| ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                initialize_node_index: Some(idx),
+                ..Default::default()
+            }),
+            vec![Some(NodeValueType::MessageList { descriptor: None }), Some(NodeValueType::Bool)],
+            matches_pattern!(TriggerFactoryError::IncompatibleNodeTypes { .. }),
+        ),
+    );
     #[test]
     fn get_edge_options_succeeds() {
         let edge_options = EdgeOptionsProto {

@@ -265,6 +265,8 @@ impl OperatorProtoExtension for OperatorProto {
                     | RelationalOperator::LT_OR_EQ => {
                         if (left.as_ref().is_none_or(|l| l.is_numeric()))
                             && get_right().is_none_or(|r| r.is_numeric())
+                            || (left.as_ref().is_none_or(|l| l.is_bool())
+                                && get_right().is_none_or(|r| r.is_bool()))
                         {
                             Ok(Some(NodeValueType::Bool))
                         } else {
@@ -641,9 +643,11 @@ mod tests {
         all_eq_deprecated: (OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::DeprecatedOperator{..}))),
 
         gt_int_int: (OperatorProto::RelationalOperator(RelationalOperator::GT.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        gt_bool_bool: (OperatorProto::RelationalOperator(RelationalOperator::GT.into()), Some(NodeValueType::Bool), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
         gt_or_eq_int_float: (OperatorProto::RelationalOperator(RelationalOperator::GT_OR_EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
         lt_float_float: (OperatorProto::RelationalOperator(RelationalOperator::LT.into()), Some(NodeValueType::Float), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
         lt_or_eq_float_float: (OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into()), Some(NodeValueType::Float), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
+        gt_or_eq_int_bool_err: (OperatorProto::RelationalOperator(RelationalOperator::GT_OR_EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Bool), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands))),
         gt_int_string_err: (OperatorProto::RelationalOperator(RelationalOperator::GT.into()), Some(NodeValueType::Int), Some(NodeValueType::String), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands))),
 
         contains_intlist_int: (OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
