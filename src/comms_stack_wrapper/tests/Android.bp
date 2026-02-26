@@ -22,9 +22,12 @@ rust_binary {
         // keep-sorted start
         "libanyhow",
         "libclap",
+        "libfutures",
+        "libparking_lot",
         "libprotobuf",
         "libsdv_comms_rs",
         "libsdv_proto_reflection_rs",
+        "libsdv_status_rs",
         "libsdv_telemetry_comms_utils",
         "libsdv_telemetry_utils",
         "libtokio",

@@ -16,7 +16,6 @@
 
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
-use futures::future::{self, BoxFuture};
 use futures::StreamExt;
 use log::debug;
 use protobuf::reflect::MessageDescriptor;
@@ -45,143 +44,126 @@ const GET_LATEST_MESSAGE_METHOD: &str = "GetLatestMessage";
 const PROTO_ANY_FULL_NAME: &str = "google.protobuf.Any";
 const RPC_UNARY_CALL_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub(super) struct SdvRpcClient {
-    ctx: future::Shared<BoxFuture<'static, ContextRef>>,
-}
-
 struct SdvRpcSubscription {
     _subscription_drop_guard: DropGuard,
 }
 
-impl SdvRpcClient {
-    pub(super) fn new(ctx: future::Shared<BoxFuture<'static, ContextRef>>) -> Self {
-        Self { ctx }
-    }
-
-    pub(super) async fn get_message_provider(
-        &self,
-        unit_identifier: UnitIdentifier,
-        config_descriptor: MessageDescriptor,
-        message_descriptor: MessageDescriptor,
-    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
-        let mut client_options = rpc::ClientOptions::default();
-        client_options.set_timeout(RPC_UNARY_CALL_TIMEOUT);
-        let client =
-            rpc::Client::create(self.ctx.clone().await, unit_identifier.clone(), &client_options)
-                .await
-                .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
-
-        struct ServicePublisherMessageProviderImpl {
-            client: rpc::Client,
-            config_descriptor: MessageDescriptor,
-            message_descriptor: MessageDescriptor,
-        }
-
-        #[async_trait]
-        impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
-            #[tracing::instrument(skip(self, configuration), fields(
-                publisher_type = "rpc",
-                await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
-                    |e| e.duration()).as_nanos(),
-            ))]
-            async fn get_latest_message(
-                &self,
-                configuration: Option<&Any>,
-            ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
-                let configuration_bytes =
-                    SdvRpcClient::serialize_configuration(configuration, &self.config_descriptor)?;
-                let maybe_response_bytes = self
-                    .client
-                    .unary_call(GET_LATEST_MESSAGE_METHOD, &configuration_bytes)
-                    .await
-                    .map_or_else(
-                        |err| match err.status_code() {
-                            SdvStatusCode::NotFound => Ok(None),
-                            _ => Err(ServicePublisherAccessorError::MessageRetrievalFailed(
-                                err.into(),
-                            )),
-                        },
-                        |response_bytes| Ok(Some(response_bytes)),
-                    )?;
-                let Some(response_bytes) = maybe_response_bytes else { return Ok(None) };
-
-                let response =
-                    self.message_descriptor.parse_from_bytes(&response_bytes).map_err(|err| {
-                        ServicePublisherAccessorError::MessageParsingFailed(err.into())
-                    })?;
-                Ok(Some(response))
-            }
-        }
-
-        Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
-            client,
-            config_descriptor,
-            message_descriptor,
-        })))
-    }
-
-    pub(super) async fn create_subscription(
-        &self,
-        unit_identifier: UnitIdentifier,
-        configuration: Option<&Any>,
-        config_descriptor: MessageDescriptor,
-        message_descriptor: MessageDescriptor,
-        mut new_message_callback: NewMessageCallback,
-        cancellation_callback: CancellationCallback,
-    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
-        // Note: **No timeout** is set on this client.
-        //
-        // We set a general timeout, `RPC_UNARY_CALL_TIMEOUT` by default, on gRPC cals from the
-        // `client` in `get_latest_message()`, which is **only** used for unary gRPC calls.
-        //
-        // This `client` is used **only** for server-streaming calls, which gRPC treats as the
-        // timeout for receiving the whole stream (not the first message). Defining a general
-        // timeout for all server-streaming calls is tricky. Some server-streaming RPC calls might
-        // justifiably take a few seconds, even longer.
-        let client = rpc::Client::create(
-            self.ctx.clone().await,
-            unit_identifier.clone(),
-            &rpc::ClientOptions::default(),
-        )
+pub(super) async fn get_message_provider(
+    ctx: ContextRef,
+    unit_identifier: UnitIdentifier,
+    config_descriptor: MessageDescriptor,
+    message_descriptor: MessageDescriptor,
+) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
+    let mut client_options = rpc::ClientOptions::default();
+    client_options.set_timeout(RPC_UNARY_CALL_TIMEOUT);
+    let client = rpc::Client::create(ctx, unit_identifier.clone(), &client_options)
         .await
         .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
 
-        let configuration_bytes = Self::serialize_configuration(configuration, &config_descriptor)?;
-        let mut response_stream = client
-            .server_streaming_call(CREATE_SUBSCRIPTION_METHOD, &configuration_bytes)
-            .await
-            .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
+    struct ServicePublisherMessageProviderImpl {
+        client: rpc::Client,
+        config_descriptor: MessageDescriptor,
+        message_descriptor: MessageDescriptor,
+    }
 
-        let cancellation_token = CancellationToken::new();
-        let subscription_drop_guard = cancellation_token.clone().drop_guard();
+    #[async_trait]
+    impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+        #[tracing::instrument(skip(self, configuration), fields(
+            publisher_type = "rpc",
+            await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+                |e| e.duration()).as_nanos(),
+        ))]
+        async fn get_latest_message(
+            &self,
+            configuration: Option<&Any>,
+        ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
+            let configuration_bytes =
+                serialize_configuration(configuration, &self.config_descriptor)?;
+            let maybe_response_bytes = self
+                .client
+                .unary_call(GET_LATEST_MESSAGE_METHOD, &configuration_bytes)
+                .await
+                .map_or_else(
+                    |err| match err.status_code() {
+                        SdvStatusCode::NotFound => Ok(None),
+                        _ => Err(ServicePublisherAccessorError::MessageRetrievalFailed(err.into())),
+                    },
+                    |response_bytes| Ok(Some(response_bytes)),
+                )?;
+            let Some(response_bytes) = maybe_response_bytes else { return Ok(None) };
 
-        tokio::spawn(async move {
-            loop {
-                match select! {
-                    biased;
-                    _ = cancellation_token.cancelled() => None,
-                    result = response_stream.next() => Some(result),
-                } {
-                    None => {
-                        // Subscription is cancelled on the Telemetry Service side.
-                        return;
-                    }
-                    Some(None) => {
-                        // Subscription is cancelled on the publisher side.
-                        (cancellation_callback)();
-                        return;
-                    }
-                    Some(Some(result)) => {
-                        let message_id = MessageId::new();
-                        tracing::event!(
-                            tracing::Level::INFO,
-                            "New message by RPC Publisher, message_id = {}",
-                            message_id
-                        );
+            let response = self
+                .message_descriptor
+                .parse_from_bytes(&response_bytes)
+                .map_err(|err| ServicePublisherAccessorError::MessageParsingFailed(err.into()))?;
+            Ok(Some(response))
+        }
+    }
 
-                        let buffer = match result
-                            .context("RPC server stream produced an intermittent error")
-                        {
+    Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
+        client,
+        config_descriptor,
+        message_descriptor,
+    })))
+}
+
+pub(super) async fn create_subscription(
+    ctx: ContextRef,
+    unit_identifier: UnitIdentifier,
+    configuration: Option<&Any>,
+    config_descriptor: MessageDescriptor,
+    message_descriptor: MessageDescriptor,
+    mut new_message_callback: NewMessageCallback,
+    cancellation_callback: CancellationCallback,
+) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
+    // Note: **No timeout** is set on this client.
+    //
+    // We set a general timeout, `RPC_UNARY_CALL_TIMEOUT` by default, on gRPC cals from the
+    // `client` in `get_latest_message()`, which is **only** used for unary gRPC calls.
+    //
+    // This `client` is used **only** for server-streaming calls, which gRPC treats as the
+    // timeout for receiving the whole stream (not the first message). Defining a general
+    // timeout for all server-streaming calls is tricky. Some server-streaming RPC calls might
+    // justifiably take a few seconds, even longer.
+    let client = rpc::Client::create(ctx, unit_identifier.clone(), &rpc::ClientOptions::default())
+        .await
+        .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
+
+    let configuration_bytes = serialize_configuration(configuration, &config_descriptor)?;
+    let mut response_stream = client
+        .server_streaming_call(CREATE_SUBSCRIPTION_METHOD, &configuration_bytes)
+        .await
+        .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
+
+    let cancellation_token = CancellationToken::new();
+    let subscription_drop_guard = cancellation_token.clone().drop_guard();
+
+    tokio::spawn(async move {
+        loop {
+            match select! {
+                biased;
+                _ = cancellation_token.cancelled() => None,
+                result = response_stream.next() => Some(result),
+            } {
+                None => {
+                    // Subscription is cancelled on the Telemetry Service side.
+                    return;
+                }
+                Some(None) => {
+                    // Subscription is cancelled on the publisher side.
+                    (cancellation_callback)();
+                    return;
+                }
+                Some(Some(result)) => {
+                    let message_id = MessageId::new();
+                    tracing::event!(
+                        tracing::Level::INFO,
+                        "New message by RPC Publisher, message_id = {}",
+                        message_id
+                    );
+
+                    let buffer =
+                        match result.context("RPC server stream produced an intermittent error") {
                             Ok(buffer) => buffer,
                             Err(err) => {
                                 (new_message_callback)(Err(
@@ -191,126 +173,127 @@ impl SdvRpcClient {
                             }
                         };
 
-                        debug!(
-                            "Received 1 message from service unit '{}'.",
-                            unit_identifier_to_string(&unit_identifier)
-                        );
+                    debug!(
+                        "Received 1 message from service unit '{}'.",
+                        unit_identifier_to_string(&unit_identifier)
+                    );
 
-                        let message = message_descriptor
-                            .parse_from_bytes(&buffer)
-                            .context("Failed to parse the protobuf message")
-                            .map(|msg| (msg, message_id.into()))
-                            .map_err(ServicePublisherAccessorError::MessageParsingFailed);
-                        (new_message_callback)(message);
-                    }
+                    let message = message_descriptor
+                        .parse_from_bytes(&buffer)
+                        .context("Failed to parse the protobuf message")
+                        .map(|msg| (msg, message_id.into()))
+                        .map_err(ServicePublisherAccessorError::MessageParsingFailed);
+                    (new_message_callback)(message);
                 }
             }
-        });
+        }
+    });
 
-        let subscription =
-            Box::new(SdvRpcSubscription { _subscription_drop_guard: subscription_drop_guard });
+    let subscription =
+        Box::new(SdvRpcSubscription { _subscription_drop_guard: subscription_drop_guard });
 
-        Ok(CreateSubscriptionOutcome::Subscribed {
-            subscription,
-            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-        })
-    }
+    Ok(CreateSubscriptionOutcome::Subscribed {
+        subscription,
+        fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+    })
+}
 
-    pub(super) async fn get_message_descriptor(
-        vsidl_provider: &dyn VsidlConfigProvider,
-        service_unit_definition: &ServiceUnitDefinition,
-    ) -> anyhow::Result<(MessageDescriptor, MessageDescriptor)> {
-        let (create_subscription_req, create_subscription_res) = Self::get_descriptor_for_method(
-            vsidl_provider,
-            service_unit_definition,
-            CREATE_SUBSCRIPTION_METHOD,
+pub(super) async fn get_message_descriptor(
+    vsidl_provider: &dyn VsidlConfigProvider,
+    service_unit_definition: &ServiceUnitDefinition,
+) -> anyhow::Result<(MessageDescriptor, MessageDescriptor)> {
+    let (create_subscription_req, create_subscription_res) = get_descriptor_for_method(
+        vsidl_provider,
+        service_unit_definition,
+        CREATE_SUBSCRIPTION_METHOD,
+    )
+    .await?
+    .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
+    let (get_latest_message_req, get_latest_message_res) = get_descriptor_for_method(
+        vsidl_provider,
+        service_unit_definition,
+        GET_LATEST_MESSAGE_METHOD,
+    )
+    .await?
+    .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
+    let req_descriptor =
+        get_either_or_ensure_equal(create_subscription_req, get_latest_message_req).with_context(
+            || {
+                format!(
+                    "Retrieving request descriptor for {}|{}",
+                    service_unit_definition.get_service_bundle_identity().get_fqin(),
+                    service_unit_definition.get_unit_type()
+                )
+            },
+        )?;
+    let res_descriptor =
+        get_either_or_ensure_equal(create_subscription_res, get_latest_message_res).with_context(
+            || {
+                format!(
+                    "Retrieving response descriptor for {}|{}",
+                    service_unit_definition.get_service_bundle_identity().get_fqin(),
+                    service_unit_definition.get_unit_type()
+                )
+            },
+        )?;
+    Ok((req_descriptor, res_descriptor))
+}
+
+async fn get_descriptor_for_method(
+    vsidl_provider: &dyn VsidlConfigProvider,
+    service_unit_definition: &ServiceUnitDefinition,
+    method_name: &str,
+) -> anyhow::Result<Option<(MessageDescriptor, MessageDescriptor)>> {
+    let Ok(rpc_descriptor) = vsidl_provider
+        .get_rpc_method_descriptor(
+            service_unit_definition.get_service_bundle_identity().get_fqin(),
+            &service_unit_definition.get_unit_type(),
+            method_name,
         )
-        .await?
-        .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
-        let (get_latest_message_req, get_latest_message_res) = Self::get_descriptor_for_method(
-            vsidl_provider,
-            service_unit_definition,
-            GET_LATEST_MESSAGE_METHOD,
+        .await
+    else {
+        return Ok(None);
+    };
+
+    let Some(request_message) = rpc_descriptor.request_message else {
+        bail!(
+            "VSIDL provider descriptor for {}|{} has no request message",
+            service_unit_definition.get_service_bundle_identity().get_fqin(),
+            service_unit_definition.get_unit_type()
+        );
+    };
+    let Some(response_message) = rpc_descriptor.response_message else {
+        bail!(
+            "VSIDL provider descriptor for {}|{} has no response message",
+            service_unit_definition.get_service_bundle_identity().get_fqin(),
+            service_unit_definition.get_unit_type()
+        );
+    };
+
+    Ok(Some((request_message, response_message)))
+}
+
+fn serialize_configuration(
+    configuration: Option<&Any>,
+    descriptor: &MessageDescriptor,
+) -> Result<Vec<u8>, ServicePublisherAccessorError> {
+    configuration
+        .map_or_else(
+            || Empty::default_instance().write_to_bytes().context("Serialization failed"),
+            |config| {
+                if descriptor.full_name() == PROTO_ANY_FULL_NAME {
+                    config.write_to_bytes()
+                } else {
+                    config
+                        .unpack_dyn(descriptor)
+                        .context("Failed unpacking")?
+                        .ok_or(anyhow!("Type mismatch between {config:?} and {descriptor:?}"))?
+                        .write_to_bytes_dyn()
+                }
+                .context("Serialization failed")
+            },
         )
-        .await?
-        .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
-        let req_descriptor =
-            get_either_or_ensure_equal(create_subscription_req, get_latest_message_req)
-                .with_context(|| {
-                    format!(
-                        "Retrieving request descriptor for {}|{}",
-                        service_unit_definition.get_service_bundle_identity().get_fqin(),
-                        service_unit_definition.get_unit_type()
-                    )
-                })?;
-        let res_descriptor =
-            get_either_or_ensure_equal(create_subscription_res, get_latest_message_res)
-                .with_context(|| {
-                    format!(
-                        "Retrieving response descriptor for {}|{}",
-                        service_unit_definition.get_service_bundle_identity().get_fqin(),
-                        service_unit_definition.get_unit_type()
-                    )
-                })?;
-        Ok((req_descriptor, res_descriptor))
-    }
-
-    async fn get_descriptor_for_method(
-        vsidl_provider: &dyn VsidlConfigProvider,
-        service_unit_definition: &ServiceUnitDefinition,
-        method_name: &str,
-    ) -> anyhow::Result<Option<(MessageDescriptor, MessageDescriptor)>> {
-        let Ok(rpc_descriptor) = vsidl_provider
-            .get_rpc_method_descriptor(
-                service_unit_definition.get_service_bundle_identity().get_fqin(),
-                &service_unit_definition.get_unit_type(),
-                method_name,
-            )
-            .await
-        else {
-            return Ok(None);
-        };
-
-        let Some(request_message) = rpc_descriptor.request_message else {
-            bail!(
-                "VSIDL provider descriptor for {}|{} has no request message",
-                service_unit_definition.get_service_bundle_identity().get_fqin(),
-                service_unit_definition.get_unit_type()
-            );
-        };
-        let Some(response_message) = rpc_descriptor.response_message else {
-            bail!(
-                "VSIDL provider descriptor for {}|{} has no response message",
-                service_unit_definition.get_service_bundle_identity().get_fqin(),
-                service_unit_definition.get_unit_type()
-            );
-        };
-
-        Ok(Some((request_message, response_message)))
-    }
-
-    fn serialize_configuration(
-        configuration: Option<&Any>,
-        descriptor: &MessageDescriptor,
-    ) -> Result<Vec<u8>, ServicePublisherAccessorError> {
-        configuration
-            .map_or_else(
-                || Empty::default_instance().write_to_bytes().context("Serialization failed"),
-                |config| {
-                    if descriptor.full_name() == PROTO_ANY_FULL_NAME {
-                        config.write_to_bytes()
-                    } else {
-                        config
-                            .unpack_dyn(descriptor)
-                            .context("Failed unpacking")?
-                            .ok_or(anyhow!("Type mismatch between {config:?} and {descriptor:?}"))?
-                            .write_to_bytes_dyn()
-                    }
-                    .context("Serialization failed")
-                },
-            )
-            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)
-    }
+        .map_err(ServicePublisherAccessorError::MetadataParsingFailed)
 }
 
 #[async_trait]
@@ -363,7 +346,7 @@ mod tests {
     #[test]
     fn test_serialize_configuration_none() {
         let descriptor = Empty::descriptor();
-        let result = SdvRpcClient::serialize_configuration(None, &descriptor).unwrap();
+        let result = serialize_configuration(None, &descriptor).unwrap();
         let expected = Empty::new().write_to_bytes().unwrap();
         assert_eq!(result, expected);
     }
@@ -380,7 +363,7 @@ mod tests {
         let descriptor = Any::descriptor();
         assert_eq!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
 
-        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor).unwrap();
+        let result = serialize_configuration(Some(&config_any), &descriptor).unwrap();
         assert_eq!(result, config_bytes);
     }
 
@@ -396,7 +379,7 @@ mod tests {
         let descriptor = StringValue::descriptor();
         assert_ne!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
 
-        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor).unwrap();
+        let result = serialize_configuration(Some(&config_any), &descriptor).unwrap();
         assert_eq!(result, expected_bytes);
     }
 
@@ -411,7 +394,7 @@ mod tests {
         let descriptor = Int32Value::descriptor();
         assert_ne!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
 
-        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor);
+        let result = serialize_configuration(Some(&config_any), &descriptor);
 
         assert!(result.is_err());
         let error_str = result.unwrap_err().to_string();
@@ -434,7 +417,7 @@ mod tests {
         let descriptor = StringValue::descriptor();
         assert_ne!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
 
-        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor);
+        let result = serialize_configuration(Some(&config_any), &descriptor);
 
         assert!(result.is_err());
         let error_str = result.unwrap_err().to_string();
