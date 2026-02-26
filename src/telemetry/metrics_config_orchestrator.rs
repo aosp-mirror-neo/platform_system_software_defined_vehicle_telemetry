@@ -1015,14 +1015,6 @@ impl MetricsConfigOrchestratorImpl {
                 ),
             }
 
-            // Unsubscribe from start trigger.
-            config
-                .start_trigger
-                .as_ref()
-                .expect("Start trigger is expected to exist in the start trigger fired handler")
-                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
-                .await;
-
             // Start data collection.
             Self::start_data_collection(&config).await;
 
@@ -1053,6 +1045,14 @@ impl MetricsConfigOrchestratorImpl {
                 .as_ref()
                 .expect("Start trigger is expected to exist in the start trigger fired handler")
                 .fire_manually(context)
+                .await;
+
+            // Unsubscribe from start trigger.
+            config
+                .start_trigger
+                .as_ref()
+                .expect("Start trigger is expected to exist in the start trigger fired handler")
+                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
                 .await;
 
             // Let other TriggerSubscribers of start_trigger know that MetricsConfigStart
@@ -2545,10 +2545,10 @@ mod tests {
         let expected_calls = vec![
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
-            (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
             (ACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
+            (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
             (DEACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
