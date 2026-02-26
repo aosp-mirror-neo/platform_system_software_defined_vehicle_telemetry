@@ -14,23 +14,22 @@
 
 //! Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
 use futures::Stream;
 use futures::{FutureExt, StreamExt};
-use log::{debug, error, info};
+use log::{error, info};
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
-use protobuf::{Message, MessageFull};
+use protobuf::MessageFull;
 use sdv_comms::sd::{
     ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitMetadata,
     UnitNameDiscoveryArgs,
 };
 use sdv_comms::ContextRef;
 use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProvider};
-use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_comms_utils::ServiceName;
 use sdv_telemetry_service_publisher_accessor::{
@@ -39,13 +38,13 @@ use sdv_telemetry_service_publisher_accessor::{
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
-use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber;
+use crate::metadata::fetch_metadata;
 use crate::metadata::Metadata;
 use crate::sdv_rpc_client;
 
@@ -275,10 +274,11 @@ impl CommsStackAccessor {
             return Ok(None);
         };
 
-        let Metadata { config_descriptor, message_descriptor } = self
-            .parse_telemetry_metadata(&service_name, &service_unit_definition)
-            .await
-            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let vsidl_provider = self.vsidl_provider.clone();
+        let Metadata { config_descriptor, message_descriptor } =
+            fetch_metadata(&service_name, &service_unit_definition, || vsidl_provider)
+                .await
+                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         match self.cached_metadata.entry(service_name) {
             DashMapEntry::Occupied(o) => {
@@ -372,74 +372,6 @@ impl CommsStackAccessor {
         }
     }
 
-    async fn parse_telemetry_metadata(
-        &self,
-        service_name: &ServiceName,
-        service_unit_definition: &ServiceUnitDefinition,
-    ) -> anyhow::Result<Metadata> {
-        let app_metadata = service_unit_definition.get_application_metadata();
-        if !app_metadata.is_empty() {
-            debug!("Service unit definition for {service_name} contains application metadata, using it to retrieve descriptor");
-
-            let publisher_metadata = MessageMetadata::parse_from_bytes(app_metadata.as_slice())
-                .with_context(|| "Failed to parse publisher app metadata")?;
-
-            // Build the provided proto file descriptors.
-            let file_descriptors_len = publisher_metadata.file_descriptors.len();
-            let file_descriptors =
-                FileDescriptorsAndWkts::try_from(publisher_metadata.file_descriptors)
-                    .with_context(|| "Invalid Descriptor Protos")?;
-
-            return file_descriptors.find_message_by_full_name(
-                &publisher_metadata.message_full_name
-            )
-                .map(|message_descriptor| Metadata { config_descriptor: None, message_descriptor })
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Message named \"{}\" not found in file descriptors ({file_descriptors_len} file descriptors provided)",
-                        publisher_metadata.message_full_name,
-                    )
-            });
-        }
-
-        debug!("Querying VSIDL provider to retrieve descriptor for {service_name}");
-        let vsidl_provider = self
-            .vsidl_provider
-            .clone()
-            .await
-            .ok_or_else(|| anyhow!("VSIDL provider is not available"))?;
-        match service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => data_tunnel_subscriber::get_message_descriptor(
-                vsidl_provider.as_ref(),
-                service_unit_definition,
-            )
-            .await
-            .map(|maybe_message_descriptor| {
-                maybe_message_descriptor.map(|message_descriptor| Metadata {
-                    config_descriptor: None,
-                    message_descriptor,
-                })
-            }),
-            UnitMetadata::Server(_) => sdv_rpc_client::get_message_descriptor(
-                vsidl_provider.as_ref(),
-                service_unit_definition,
-            )
-            .await
-            .map(|maybe_descriptors| {
-                maybe_descriptors.map(|(config_descriptor, message_descriptor)| Metadata {
-                    config_descriptor: Some(config_descriptor),
-                    message_descriptor,
-                })
-            }),
-        }
-        .with_context(|| {
-            format!("Invalid descriptor(s) retrieved from VSIDL provider for '{service_name}'")
-        })?
-        .ok_or_else(|| {
-            anyhow!("VSIDL provider was unable to provide a descriptor for '{service_name}'")
-        })
-    }
-
     async fn get_unit_change_stream(
         &self,
         service_name: ServiceName,
@@ -516,11 +448,13 @@ mod integration_tests {
     use protobuf::descriptor::FileDescriptorProto;
     use protobuf::well_known_types::empty::Empty;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
+    use protobuf::Message;
     use protobuf::{reflect::ReflectValueRef, MessageDyn, MessageFull};
     use sdv_comms::dt;
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;
     use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProvider, RpcMethodDescriptor};
+    use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
     use sdv_status_rs::SdvStatus;
     use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
