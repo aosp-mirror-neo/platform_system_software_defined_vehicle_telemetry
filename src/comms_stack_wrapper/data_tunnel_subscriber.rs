@@ -14,7 +14,7 @@
 
 //! Telemetry subscription logic for DT.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::debug;
@@ -192,22 +192,14 @@ pub fn get_message_provider(
 pub(super) async fn get_message_descriptor(
     vsidl_provider: &dyn VsidlConfigProvider,
     service_unit_definition: &ServiceUnitDefinition,
-) -> anyhow::Result<MessageDescriptor> {
-    let descriptor = vsidl_provider
+) -> anyhow::Result<Option<MessageDescriptor>> {
+    Ok(vsidl_provider
         .get_publication_descriptor(
             service_unit_definition.get_service_bundle_identity().get_fqin(),
             &service_unit_definition.get_unit_type(),
         )
         .await
-        .map_err(|e| {
-            anyhow!(
-                "VSIDL provider was unable to provide publication descriptor for {}|{}: {e}",
-                service_unit_definition.get_service_bundle_identity().get_fqin(),
-                service_unit_definition.get_unit_type()
-            )
-        })?;
-
-    Ok(descriptor.message_descriptor)
+        .map(|publication_descriptor| Some(publication_descriptor.message_descriptor))?)
 }
 
 pub(crate) fn read_length_delimited_proto(
@@ -283,12 +275,12 @@ mod tests {
         let result = get_message_descriptor(&mock_vsidl_provider, &service_unit_definition).await;
 
         // Assert
-        assert_that!(result, ok(eq(&expected_descriptor)));
+        assert_that!(result, ok(some(eq(&expected_descriptor))));
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_message_descriptor_failure() {
+    async fn get_message_descriptor_not_found() {
         // Get ServiceUnitDefinition
         let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
@@ -312,11 +304,6 @@ mod tests {
         // Get Message Descriptor
         let result = get_message_descriptor(&mock_vsidl_provider, &service_unit_definition).await;
 
-        assert_that!(
-            result,
-            err(displays_as(contains_substring(
-                "VSIDL provider was unable to provide publication descriptor"
-            )))
-        );
+        assert_that!(result, err(anything()));
     }
 }

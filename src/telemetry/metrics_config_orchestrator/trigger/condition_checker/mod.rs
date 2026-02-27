@@ -24,6 +24,15 @@ use anyhow::{bail, Context};
 use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 
+// Represents how the very first value should be handled for condition checkers which compare two
+// subsequent values.
+#[cfg_attr(test, derive(Debug, PartialEq))]
+pub enum EvaluatedFirstValuePolicy {
+    Skip,
+    FireTrigger,
+    CompareTo { value: NodeValue },
+}
+
 pub(crate) trait ConditionChecker: Send + Sync {
     fn check(&mut self, value: NodeValue) -> anyhow::Result<bool>;
 }

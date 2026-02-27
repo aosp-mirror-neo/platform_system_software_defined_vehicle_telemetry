@@ -131,8 +131,24 @@ message ConditionalTrigger {
     EdgeOptions rising_options = 1;
 
     // Optional. If true, the very first selector expression evaluation will unconditionally make
-    // this trigger fire. If true, edge options must not be set.
+    // this trigger fire. If true, edge options and initialize_node_index must not be set.
     bool fire_initial = 2;
+
+    // Optional.
+    // The index of the root node of the expression to be evaluated for the initialization of the
+    // value used for comparisons. The evaluation takes place immediately when this conditional
+    // trigger is activated, and, in particular, before any parent trigger fire events are being
+    // processed.
+    //
+    // Set this field if you want to have the very first selector expression evaluation be compared
+    // with the initial value. If not set, the initial value will be treated as None.
+    //
+    // Setting both `initialize_node_index` and `fire_initial` is not allowed.
+    //
+    // The expression must evaluate to a numeric or boolean type, which also has to be
+    // comparison-compatible with the type of selector expression (i.e. booleans can't be compared
+    // with numeric types).
+    optional uint32 initialize_node_index = 3;
   }
 
   // Fires if the new value is less than the previous value.
@@ -141,8 +157,24 @@ message ConditionalTrigger {
     EdgeOptions falling_options = 1;
 
     // Optional. If true, the very first selector expression evaluation will unconditionally make
-    // this trigger fire. If true, edge options must not be set.
+    // this trigger fire. If true, edge options and initialize_node_index must not be set.
     bool fire_initial = 2;
+
+    // Optional.
+    // The index of the root node of the expression to be evaluated for the initialization of the
+    // value used for comparisons. The evaluation takes place immediately when this conditional
+    // trigger is activated, and, in particular, before any parent trigger fire events are being
+    // processed.
+    //
+    // Set this field if you want to have the very first selector expression evaluation be compared
+    // with the initial value. If not set, the initial value will be treated as None.
+    //
+    // Setting both `initialize_node_index` and `fire_initial` is not allowed.
+    //
+    // The expression must evaluate to a numeric or boolean type, which also has to be
+    // comparison-compatible with the type of selector expression (i.e. booleans can't be compared
+    // with numeric types).
+    optional uint32 initialize_node_index = 3;
   }
 
   // Fires if the new value is different from the previous value. If any
@@ -156,8 +188,25 @@ message ConditionalTrigger {
     EdgeOptions falling_options = 2;
 
     // Optional. If true, the very first selector expression evaluation will unconditionally make
-    // this trigger fire. If true, edge options must not be set.
+    // this trigger fire. If true, edge options and initialize_node_index must not be set.
     bool fire_initial = 3;
+
+    // Optional.
+    // The index of the root node of the expression to be evaluated for the initialization of the
+    // value used for comparisons. The evaluation takes place immediately when this conditional
+    // trigger is activated, and, in particular, before any parent trigger fire events are being
+    // processed.
+    //
+    // Set this field if you want to have the very first selector expression evaluation be compared
+    // with the initial value. If not set, the initial value will be treated as None.
+    //
+    // Setting both `initialize_node_index` and `fire_initial` is not allowed.
+    //
+    // If any edge options are provided, the expression must evaluate to a numeric or boolean type,
+    // which also has to be comparison-compatible with the type of selector expression (i.e.
+    // booleans can't be compared with numeric types). If no edge options are provided, the type of
+    // evaluation can be any.
+    optional uint32 initialize_node_index = 4;
   }
 
   // Fires if the condition evaluates to true or a non-zero numeric value.

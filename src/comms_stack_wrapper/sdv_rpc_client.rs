@@ -201,45 +201,34 @@ pub(super) async fn create_subscription(
 pub(super) async fn get_message_descriptor(
     vsidl_provider: &dyn VsidlConfigProvider,
     service_unit_definition: &ServiceUnitDefinition,
-) -> anyhow::Result<(MessageDescriptor, MessageDescriptor)> {
-    let (create_subscription_req, create_subscription_res) = get_descriptor_for_method(
+) -> anyhow::Result<Option<(MessageDescriptor, MessageDescriptor)>> {
+    let (create_subscription_req, create_subscription_res) = get_req_res_descriptors_for_method(
         vsidl_provider,
         service_unit_definition,
         CREATE_SUBSCRIPTION_METHOD,
     )
     .await?
-    .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
-    let (get_latest_message_req, get_latest_message_res) = get_descriptor_for_method(
+    .unzip();
+
+    let (get_latest_message_req, get_latest_message_res) = get_req_res_descriptors_for_method(
         vsidl_provider,
         service_unit_definition,
         GET_LATEST_MESSAGE_METHOD,
     )
     .await?
-    .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
-    let req_descriptor =
-        get_either_or_ensure_equal(create_subscription_req, get_latest_message_req).with_context(
-            || {
-                format!(
-                    "Retrieving request descriptor for {}|{}",
-                    service_unit_definition.get_service_bundle_identity().get_fqin(),
-                    service_unit_definition.get_unit_type()
-                )
-            },
-        )?;
-    let res_descriptor =
-        get_either_or_ensure_equal(create_subscription_res, get_latest_message_res).with_context(
-            || {
-                format!(
-                    "Retrieving response descriptor for {}|{}",
-                    service_unit_definition.get_service_bundle_identity().get_fqin(),
-                    service_unit_definition.get_unit_type()
-                )
-            },
-        )?;
-    Ok((req_descriptor, res_descriptor))
+    .unzip();
+
+    let config_descriptor =
+        get_either_or_ensure_equal(create_subscription_req, get_latest_message_req)
+            .context("Ambiguous configuration descriptor")?;
+    let message_descriptor =
+        get_either_or_ensure_equal(create_subscription_res, get_latest_message_res)
+            .context("Ambiguous message descriptor")?;
+
+    Ok(config_descriptor.zip(message_descriptor))
 }
 
-async fn get_descriptor_for_method(
+async fn get_req_res_descriptors_for_method(
     vsidl_provider: &dyn VsidlConfigProvider,
     service_unit_definition: &ServiceUnitDefinition,
     method_name: &str,
@@ -256,18 +245,10 @@ async fn get_descriptor_for_method(
     };
 
     let Some(request_message) = rpc_descriptor.request_message else {
-        bail!(
-            "VSIDL provider descriptor for {}|{} has no request message",
-            service_unit_definition.get_service_bundle_identity().get_fqin(),
-            service_unit_definition.get_unit_type()
-        );
+        bail!("RPC method descriptor has no request message descriptor");
     };
     let Some(response_message) = rpc_descriptor.response_message else {
-        bail!(
-            "VSIDL provider descriptor for {}|{} has no response message",
-            service_unit_definition.get_service_bundle_identity().get_fqin(),
-            service_unit_definition.get_unit_type()
-        );
+        bail!("RPC method descriptor has no response message descriptor");
     };
 
     Ok(Some((request_message, response_message)))
@@ -306,10 +287,10 @@ impl ServicePublisherSubscription for SdvRpcSubscription {
 fn get_either_or_ensure_equal(
     a: Option<MessageDescriptor>,
     b: Option<MessageDescriptor>,
-) -> anyhow::Result<MessageDescriptor> {
+) -> anyhow::Result<Option<MessageDescriptor>> {
     match (a, b) {
-        (None, None) => Err(anyhow!("VSIDL provider was unable to provide RPC method descriptor")),
-        (None, Some(descriptor)) | (Some(descriptor), None) => Ok(descriptor),
+        (None, None) => Ok(None),
+        (None, Some(descriptor)) | (Some(descriptor), None) => Ok(Some(descriptor)),
         (
             Some(a @ /* type for clarity: */ MessageDescriptor { .. }),
             Some(b @ /* type for clarity: */ MessageDescriptor { .. }),
@@ -323,9 +304,9 @@ fn get_either_or_ensure_equal(
             // irrespective of the file they are in, as well as the "full name" (= package name
             // + message name).
             if a.proto() == b.proto() && a.full_name() == b.full_name() {
-                Ok(a)
+                Ok(Some(a))
             } else {
-                Err(anyhow!("VSIDL provider returned conflicting RPC method descriptors"))
+                Err(anyhow!("Conflicting RPC method descriptors"))
             }
         }
     }
