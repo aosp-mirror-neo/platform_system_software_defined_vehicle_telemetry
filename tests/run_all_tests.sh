@@ -45,13 +45,15 @@ TEST_TARGETS=('sdv_telemetry_*' 'sdv_mt_telemetry_*')
 log "Building code..."
 # Running `m` is needed to build essential tools like `cvd`.
 m
+# Builds the sdv-cf script we use to create VMs.
+m sdv-cf
 # Build all tests, but do not run them yet. We do this before restarting the VM
 # so that we error earlier and do not need to wait for the VM to restart.
 atest --build "${TEST_TARGETS[@]}"
 # In addition to building the tests, also build all other Telemetry targets.
 # This is because some of our targets do not have tests (e.g., the samples), but
 # we want to make sure that they at least build successfully.
-(cd "${ANDROID_BUILD_TOP}" && mmm "system/software_defined_vehicle/telemetry" && mmm "system/software_defined_vehicle/samples/telemetry")
+(cd "${ANDROID_BUILD_TOP}" && mmm "system/software_defined_vehicle/telemetry" "system/software_defined_vehicle/samples/telemetry")
 
 # Restart CVD for changes to take effect
 log "Resetting VM instances..."
@@ -59,7 +61,7 @@ cvd reset -y
 cvd clear
 
 log "Starting VM instance..."
-cvd create
+sdv-cf create
 
 log "Waiting for VM to come online..."
 adb wait-for-device
