@@ -128,17 +128,25 @@ pub(super) async fn create_subscription(
     let client = rpc::Client::create(ctx, unit_identifier.clone(), &rpc::ClientOptions::default())
         .await
         .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
-
     let configuration_bytes = serialize_configuration(configuration, &config_descriptor)?;
-    let mut response_stream = client
-        .server_streaming_call(CREATE_SUBSCRIPTION_METHOD, &configuration_bytes)
-        .await
-        .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
 
     let cancellation_token = CancellationToken::new();
     let subscription_drop_guard = cancellation_token.clone().drop_guard();
 
     tokio::spawn(async move {
+        // `rpc::Client::server_streaming_call` awaits until the first item in the stream arrives
+        // to return the stream. This might take a while, since RPC server-streaming calls might be
+        // used for long-lived infrequent streams. The enclosing function is called not only in the
+        // context of MC activation in a detached task but also during initialization in the
+        // context of the main task. Thus, `server_streaming_call` should be invoked inside the
+        // detached task to avoid blocking initialization on startup.
+        let Ok(mut response_stream) =
+            client.server_streaming_call(CREATE_SUBSCRIPTION_METHOD, &configuration_bytes).await
+        else {
+            cancellation_callback();
+            return;
+        };
+
         loop {
             match select! {
                 biased;
