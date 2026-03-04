@@ -451,7 +451,6 @@ mod integration_tests {
     use protobuf::Message;
     use protobuf::{reflect::ReflectValueRef, MessageDyn, MessageFull};
     use sdv_comms::dt;
-    use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;
     use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProvider, RpcMethodDescriptor};
     use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
@@ -465,8 +464,6 @@ mod integration_tests {
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
-    use std::io::{BufRead, BufReader, Lines, Write};
-    use std::process::{Child, ChildStdout};
     use std::time::Duration;
     use tokio::sync::mpsc;
     use tokio::time::Instant;
@@ -1642,13 +1639,13 @@ mod integration_tests {
         let accessor = create_accessor_with_context();
 
         let unit_type = test_utils::make_unique_unit_type();
-        let _publisher1 = create_publisher_in_new_process(
+        let _publisher1 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-        let _publisher2 = create_publisher_in_new_process(
+        let _publisher2 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
 
         let service_name =
@@ -1718,124 +1715,6 @@ mod integration_tests {
         assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
     }
 
-    struct TestPublisherProxy {
-        child: Child,
-        fqin: ServiceFqin,
-        child_stdout: Lines<BufReader<ChildStdout>>,
-    }
-
-    impl TestPublisherProxy {
-        fn new(
-            child: Child,
-            fqin: ServiceFqin,
-            child_stdout: Lines<BufReader<ChildStdout>>,
-        ) -> Self {
-            Self { child, fqin, child_stdout }
-        }
-
-        fn register(&mut self) {
-            let mut stdin = self.child.stdin.as_ref().unwrap();
-            stdin.write_all(b"r").unwrap();
-            stdin.flush().unwrap();
-            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
-        }
-
-        fn unregister(&mut self) {
-            let mut stdin = self.child.stdin.as_ref().unwrap();
-            stdin.write_all(b"u").unwrap();
-            stdin.flush().unwrap();
-            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
-        }
-
-        #[expect(dead_code)]
-        fn publish(&mut self, value: u8) {
-            let mut stdin = self.child.stdin.as_ref().unwrap();
-            stdin.write_all(&[b'm', value]).unwrap();
-            stdin.flush().unwrap();
-            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
-        }
-    }
-
-    impl Drop for TestPublisherProxy {
-        fn drop(&mut self) {
-            self.unregister();
-
-            drop(self.child.stdin.take());
-            assert!(self.child.wait().unwrap().success());
-        }
-    }
-
-    enum PublisherType {
-        DataTunnel,
-        #[expect(dead_code)]
-        Rpc,
-    }
-
-    fn create_publisher_in_new_process(
-        service_name: String,
-        publisher_type: PublisherType,
-    ) -> TestPublisherProxy {
-        use std::process::Command;
-        use std::process::Stdio;
-        use std::str::FromStr;
-
-        let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
-            ServiceName::parse(&service_name).unwrap()
-        else {
-            panic!("Unsupported service name: '{service_name}'");
-        };
-        let unit_type = unit_type.to_string();
-
-        let mut args = vec![
-            "--fqin",
-            // Tests may run in multiple parallel processes, therefore we need to ensure that
-            // the FQINs created by the processes do not conflict with each other. This is
-            // achieved by embedding the process ID into the FQIN, which is done by the
-            // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
-            // `__PROCESS_ID__` placeholder with its process ID.
-            "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
-            "--unit-type",
-            &unit_type,
-            "--unit-name",
-            &unit_name,
-        ];
-        match publisher_type {
-            PublisherType::DataTunnel => {
-                args.extend(["data-tunnel", "--message-queue-size", "100"])
-            }
-            PublisherType::Rpc => args.extend(["rpc"]),
-        }
-        eprintln!("Spwaning publisher process with args: {args:?}");
-        let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // Print child process errors to the test's stderr.
-            .stderr(Stdio::inherit())
-            .args(args)
-            .spawn()
-            .unwrap();
-
-        let mut child_stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-        let child_fqin = child_stdout
-            .find_map(|line| {
-                let line = line.unwrap();
-                let (command, payload) = line.split_once(":")?;
-                if command == "fqin" {
-                    Some(payload.to_owned())
-                } else {
-                    None
-                }
-            })
-            .unwrap();
-        let child_fqin = ServiceFqin::from_str(&child_fqin)
-            .with_context(|| format!("Failed to parse child FQIN '{child_fqin}'"))
-            .unwrap();
-
-        let mut publisher = TestPublisherProxy::new(child, child_fqin, child_stdout);
-        publisher.register();
-        publisher
-    }
-
     // Unit Type + Unit Name -> 2 matches
     #[sdv_telemetry_test_utils::timeout]
     #[googletest::test]
@@ -1845,13 +1724,13 @@ mod integration_tests {
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let _publisher1 = create_publisher_in_new_process(
+        let _publisher1 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-        let _publisher2 = create_publisher_in_new_process(
+        let _publisher2 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
 
         let accessor = create_accessor_with_context();
@@ -1871,9 +1750,9 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(
+        let publisher = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|different-name"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
 
         let accessor = create_accessor_with_context();
@@ -1893,9 +1772,9 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(
+        let publisher = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
 
         let accessor = create_accessor_with_context();
