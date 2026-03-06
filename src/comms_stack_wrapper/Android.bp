@@ -41,6 +41,7 @@ rust_defaults {
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
+        "libtokio_stream",
         "libtokio_util",
         // keep-sorted end
     ],
@@ -72,6 +73,7 @@ rust_defaults {
         // keep-sorted start
         "libgoogletest_rust",
         "liblazy_static",
+        "libsdv_telemetry_test_proto_bool_value",
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],

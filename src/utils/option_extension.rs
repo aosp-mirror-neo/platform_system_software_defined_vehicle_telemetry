@@ -27,6 +27,11 @@ pub trait OptionExtension<T> {
     fn inspect_none<F>(self, f: F) -> Self
     where
         F: FnOnce();
+
+    /// Checks if `self`'s and `other`'s inner values are equal using the provided `eq` function.
+    fn eq_by<F>(&self, other: Option<&T>, eq: F) -> bool
+    where
+        F: FnOnce(&T, &T) -> bool;
 }
 
 impl<T> OptionExtension<T> for Option<T> {
@@ -42,6 +47,17 @@ impl<T> OptionExtension<T> for Option<T> {
             f();
         }
         self
+    }
+
+    fn eq_by<F>(&self, other: Option<&T>, eq: F) -> bool
+    where
+        F: FnOnce(&T, &T) -> bool,
+    {
+        match (self, other) {
+            (Some(a), Some(b)) => eq(a, b),
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+        }
     }
 }
 
@@ -78,5 +94,21 @@ mod tests {
 
         none: (None,      true),
         some: (Some(123), false),
+    );
+
+    parameterized_test!(
+        #[test]
+        option_extension_eq_by,
+
+        |a: Option<u64>, b: Option<u64>, expected: bool| {
+            assert_that!(a.eq_by(b.as_ref(), |a, b| 2 * a == *b), eq(expected));
+        },
+
+        none: (None, None, true),
+        some_eq: (Some(123), Some(246), true),
+
+        some_neq: (Some(123), Some(123), false),
+        some_none: (Some(123), None, false),
+        none_some: (None, Some(123), false),
     );
 }

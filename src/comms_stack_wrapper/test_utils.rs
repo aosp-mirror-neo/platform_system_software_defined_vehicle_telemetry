@@ -16,8 +16,11 @@
 
 #![cfg(test)]
 
+use anyhow::Context;
 use futures::StreamExt;
+use protobuf::well_known_types::wrappers::Int64Value;
 use protobuf::Message;
+use protobuf::MessageFull;
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::rpc;
@@ -31,7 +34,13 @@ use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvResult;
 use sdv_telemetry_comms_utils::ServiceName;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
+use std::io::{BufRead, BufReader, Lines, Write};
+use std::process::{Child, ChildStdout};
 use std::{collections::HashMap, str::FromStr};
+
+use crate::metadata::Metadata;
+use crate::metadata::MetadataGeneration;
+use crate::metadata::MetadataServiceType;
 
 pub(super) const UNIT_NAME: &str = "default";
 
@@ -147,4 +156,144 @@ fn create_registration_args(
     }
 
     unit_registration_args
+}
+
+pub(super) struct TestPublisherProxy {
+    child: Child,
+    pub(super) fqin: ServiceFqin,
+    child_stdout: Lines<BufReader<ChildStdout>>,
+}
+
+impl TestPublisherProxy {
+    pub(super) fn new(
+        child: Child,
+        fqin: ServiceFqin,
+        child_stdout: Lines<BufReader<ChildStdout>>,
+    ) -> Self {
+        Self { child, fqin, child_stdout }
+    }
+
+    pub(super) fn register(&mut self) {
+        let mut stdin = self.child.stdin.as_ref().unwrap();
+        stdin.write_all(b"r").unwrap();
+        stdin.flush().unwrap();
+        self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+    }
+
+    pub(super) fn unregister(&mut self) {
+        let mut stdin = self.child.stdin.as_ref().unwrap();
+        stdin.write_all(b"u").unwrap();
+        stdin.flush().unwrap();
+        self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+    }
+
+    pub(super) fn publish(&mut self, value: u8) {
+        let mut stdin = self.child.stdin.as_ref().unwrap();
+        stdin.write_all(&[b'm', value]).unwrap();
+        stdin.flush().unwrap();
+        self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+    }
+}
+
+impl Drop for TestPublisherProxy {
+    fn drop(&mut self) {
+        self.unregister();
+
+        drop(self.child.stdin.take());
+        assert!(self.child.wait().unwrap().success());
+    }
+}
+
+pub(super) enum PublisherType {
+    DataTunnel,
+    Rpc,
+}
+
+pub(super) fn create_publisher_in_new_process(
+    service_name: String,
+    publisher_type: PublisherType,
+) -> TestPublisherProxy {
+    use std::process::Command;
+    use std::process::Stdio;
+    use std::str::FromStr;
+
+    let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
+        ServiceName::parse(&service_name).unwrap()
+    else {
+        panic!("Unsupported service name: '{service_name}'");
+    };
+    let unit_type = unit_type.to_string();
+
+    let mut args = vec![
+        "--fqin",
+        // Tests may run in multiple parallel processes, therefore we need to ensure that
+        // the FQINs created by the processes do not conflict with each other. This is
+        // achieved by embedding the process ID into the FQIN, which is done by the
+        // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
+        // `__PROCESS_ID__` placeholder with its process ID.
+        "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
+        "--unit-type",
+        &unit_type,
+        "--unit-name",
+        &unit_name,
+    ];
+    match publisher_type {
+        PublisherType::DataTunnel => args.extend(["data-tunnel", "--message-queue-size", "100"]),
+        PublisherType::Rpc => args.extend(["rpc"]),
+    }
+    eprintln!("Spwaning publisher process with args: {args:?}");
+    let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        // Print child process errors to the test's stderr.
+        .stderr(Stdio::inherit())
+        .args(args)
+        .spawn()
+        .unwrap();
+
+    let mut child_stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let child_fqin = child_stdout
+        .find_map(|line| {
+            let line = line.unwrap();
+            let (command, payload) = line.split_once(":")?;
+            if command == "fqin" {
+                Some(payload.to_owned())
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let child_fqin = ServiceFqin::from_str(&child_fqin)
+        .with_context(|| format!("Failed to parse child FQIN '{child_fqin}'"))
+        .unwrap();
+
+    let mut publisher = TestPublisherProxy::new(child, child_fqin, child_stdout);
+    publisher.register();
+    publisher
+}
+
+// There is no way to create a `UnitIdentifier` in unit tests, other than by discovering a real
+// service. Thus, we need to create a service in order to create a `MetadataGeneration` for
+// testing.
+pub(super) async fn create_metadata_generation(
+    service_name: String,
+) -> (TestPublisherProxy, MetadataGeneration) {
+    let ctx = make_context().await;
+
+    let ServiceName::UnitTypeBased { unit_type, .. } = ServiceName::parse(&service_name).unwrap()
+    else {
+        panic!("Failed to parse service name '{service_name}' as unit-type based service name.");
+    };
+
+    let publisher =
+        create_publisher_in_new_process(service_name.to_owned(), PublisherType::DataTunnel);
+    let service_unit = discover_service(ctx, &unit_type).await;
+
+    let metadata_generation = MetadataGeneration::new(
+        MetadataServiceType::new(&service_unit.get_unit_metadata()),
+        service_unit.get_unit_identifier(),
+        Metadata { config_descriptor: None, message_descriptor: Int64Value::descriptor() },
+    );
+
+    (publisher, metadata_generation)
 }

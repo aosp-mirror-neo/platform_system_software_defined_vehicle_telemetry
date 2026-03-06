@@ -14,57 +14,44 @@
 
 //! Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 
-use anyhow::Context;
+use anyhow::anyhow;
 use async_trait::async_trait;
-use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
+use futures::future::OptionFuture;
 use futures::future::{self, BoxFuture};
 use futures::Stream;
 use futures::{FutureExt, StreamExt};
+use log::warn;
 use log::{error, info};
-use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
-use protobuf::MessageFull;
-use sdv_comms::sd::{
-    ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitMetadata,
-    UnitNameDiscoveryArgs,
-};
+use protobuf::MessageDyn;
+use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition};
 use sdv_comms::ContextRef;
 use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProvider};
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_comms_utils::ServiceName;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherMessageProvider;
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
     CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
-use std::pin::Pin;
+use std::pin::pin;
 use std::sync::Arc;
 use tokio::select;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber;
-use crate::metadata::fetch_metadata;
-use crate::metadata::Metadata;
+use crate::metadata::MetadataCache;
+use crate::metadata::MetadataGeneration;
+use crate::metadata::MetadataServiceType;
 use crate::sdv_rpc_client;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 pub struct CommsStackAccessor {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
-
-    /// Cache to store service metadata (`MessageDescriptor`s) and service unit definition,
-    /// as well as a `DropGuard` for the unit change stream.
-    cached_metadata: Arc<DashMap<ServiceName, (CachedMetadata, Option<DropGuard>)>>,
-
-    vsidl_provider:
-        future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProvider + Send + Sync>>>>,
-}
-
-#[derive(Clone)]
-struct CachedMetadata {
-    service_unit_definition: ServiceUnitDefinition,
-    config_descriptor: Option<MessageDescriptor>,
-    message_descriptor: MessageDescriptor,
+    metadata_cache: Arc<MetadataCache>,
 }
 
 #[async_trait]
@@ -77,11 +64,17 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let Some(metadata) = self.get_or_parse_metadata(service_name).await? else {
-            return Ok(None);
-        };
+        let mutex_guard = self
+            .metadata_cache
+            .get_or_fetch_current(self.ctx.clone().await, service_name)
+            .await
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let metadata = mutex_guard.borrow_map(|generation| ServicePublisherMetadata {
+            message_descriptor: generation.metadata.message_descriptor.to_owned(),
+        });
+        drop(mutex_guard);
 
-        Ok(Some(ServicePublisherMetadata { message_descriptor: metadata.message_descriptor }))
+        Ok(metadata)
     }
 
     async fn get_message_provider(
@@ -94,28 +87,131 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         info!("Creating getter for comms stack service '{service_name}'.");
 
-        let Some(metadata) = self.get_or_parse_metadata(service_name).await? else {
+        let ctx = self.ctx.clone().await;
+
+        let mutex_guard = self
+            .metadata_cache
+            .get_or_fetch_current(ctx, service_name.clone())
+            .await
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let mut stream = mutex_guard.subscribe();
+        drop(mutex_guard);
+
+        // This is guaranteed to immediately return the latest value, because the stream immediately
+        // yields the latest value.
+        let metadata_generation = stream.next().await;
+        let Some(Some(metadata_generation)) = metadata_generation else {
             return Ok(GetMessageProviderOutcome::NotRegistered);
         };
 
-        let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
+        struct ServicePublisherMessageProviderImpl {
+            inner: Arc<AsyncMutex<Option<Box<dyn ServicePublisherMessageProvider>>>>,
+            service_name: ServiceName,
+        }
 
-        match metadata.service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => data_tunnel_subscriber::get_message_provider(
-                self.ctx.clone().await,
-                unit_identifier,
-                metadata.message_descriptor,
-            ),
-            UnitMetadata::Server(_) => {
-                sdv_rpc_client::get_message_provider(
-                    self.ctx.clone().await,
-                    unit_identifier,
-                    metadata.config_descriptor.unwrap_or(Any::descriptor()),
-                    metadata.message_descriptor,
-                )
-                .await
+        impl ServicePublisherMessageProviderImpl {
+            fn new(
+                ctx: ContextRef,
+                inner: Box<dyn ServicePublisherMessageProvider>,
+                stream: impl Stream<Item = Option<MetadataGeneration>> + 'static + Send,
+                service_name: ServiceName,
+            ) -> Self {
+                let inner = Arc::new(AsyncMutex::new(Some(inner)));
+                let weak_inner = Arc::downgrade(&inner);
+                let service_name_clone = service_name.clone();
+                tokio::spawn(async move {
+                    let mut stream = pin!(stream);
+                    while let Some(metadata_generation) = stream.next().await {
+                        let Some(inner) = weak_inner.upgrade() else {
+                            // `ServicePublisherMessageProviderImpl` has been dropped.
+                            break;
+                        };
+
+                        let service_name = service_name_clone.clone();
+                        let new_inner = OptionFuture::from(metadata_generation.map(
+                            |metadata_generation| async move {
+                                let outcome =
+                                    Self::create_inner_message_provider(ctx, metadata_generation)
+                                        .await;
+                                match outcome {
+                                    Ok(GetMessageProviderOutcome::Success(inner)) => Some(inner),
+                                    outcome @ (
+                                        Ok(GetMessageProviderOutcome::GetNotSupported | GetMessageProviderOutcome::NotRegistered) |
+                                        Err(_)
+                                    ) => {
+                                        warn!("Failed to re-create Getter message provider for {service_name}: {outcome:?}");
+                                        None
+                                    },
+                                }
+                            },
+                        ))
+                        .await
+                        .flatten();
+                        *inner.lock().await = new_inner;
+                    }
+                });
+
+                Self { inner, service_name }
+            }
+
+            async fn create_inner_message_provider(
+                ctx: ContextRef,
+                metadata_generation: MetadataGeneration,
+            ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
+                match metadata_generation.service_type {
+                    MetadataServiceType::Dt => data_tunnel_subscriber::get_message_provider(
+                        ctx,
+                        metadata_generation.unit_identifier,
+                        metadata_generation.metadata.message_descriptor,
+                    ),
+                    MetadataServiceType::Rpc => {
+                        sdv_rpc_client::get_message_provider(
+                            ctx,
+                            metadata_generation.unit_identifier,
+                            metadata_generation.metadata.get_config_descriptor_or_any(),
+                            metadata_generation.metadata.message_descriptor,
+                        )
+                        .await
+                    }
+                }
             }
         }
+
+        #[async_trait]
+        impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            async fn get_latest_message(
+                &self,
+                configuration: Option<&Any>,
+            ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
+                let inner = self.inner.lock().await;
+                let Some(inner) = inner.as_ref() else {
+                    return Err(ServicePublisherAccessorError::MessageRetrievalFailed(anyhow!(
+                        "Service {} is not currently available.",
+                        self.service_name
+                    )));
+                };
+
+                inner.get_latest_message(configuration).await
+            }
+        }
+
+        let inner_message_provider =
+            match ServicePublisherMessageProviderImpl::create_inner_message_provider(
+                ctx,
+                metadata_generation,
+            )
+            .await?
+            {
+                GetMessageProviderOutcome::Success(message_provider) => message_provider,
+                outcome => return Ok(outcome),
+            };
+
+        Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl::new(
+            ctx,
+            inner_message_provider,
+            stream,
+            service_name,
+        ))))
     }
 
     async fn create_subscription<'a>(
@@ -136,50 +232,59 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         info!("Subscribing to comms stack service '{service_name}'.");
 
-        let Some(metadata) = self.get_or_parse_metadata(service_name.clone()).await? else {
+        let ctx = self.ctx.clone().await;
+
+        let mutex_guard = self
+            .metadata_cache
+            .get_or_fetch_current(ctx, service_name.clone())
+            .await
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let Some(metadata_generation) = mutex_guard.borrow_map(|generation| generation.to_owned())
+        else {
             return Ok(CreateSubscriptionOutcome::NotRegistered {
                 new_message_callback,
                 cancellation_callback,
             });
         };
-
-        let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
+        drop(mutex_guard);
 
         // Ensure that we cleanup cached metadata on cancellation (= the service we subscribe to
         // stopping), before notifying the rest of the system of the cancellation. This is important
         // because otherwise, the `ServicePublisher` doesn't use availability callback
         // notifications, but polling.
         //
-        // The availability callback registered in `Self::get_or_parse_metadata`, which also cleans
-        // up metadata when a service is stopping, is not sufficient, because we might receive the
+        // The availability callback registered in `Self::metadata_cache`, which also cleans up
+        // metadata when a service is stopping, is not sufficient, because we might receive the
         // notification of the service having stopped only after the cancellation callback runs, and
         // therefore, only after the Telemetry Service tries to re-subscribe.
-        let cached_metadata_clone = Arc::clone(&self.cached_metadata);
+        let metadata_cache = Arc::clone(&self.metadata_cache);
         let cancellation_callback = Box::new(move || {
-            cached_metadata_clone.remove(&service_name);
-            cancellation_callback();
+            tokio::spawn(async move {
+                metadata_cache.remove_generation(&service_name, metadata_generation.id).await;
+                cancellation_callback();
+            });
         });
 
-        match metadata.service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => {
+        match metadata_generation.service_type {
+            MetadataServiceType::Dt => {
                 data_tunnel_subscriber::create_subscription(
-                    self.ctx.clone().await,
-                    unit_identifier,
+                    ctx,
+                    metadata_generation.unit_identifier,
                     fetch_last_message,
-                    metadata.message_descriptor,
+                    metadata_generation.metadata.message_descriptor,
                     sub_sampling_interval,
                     new_message_callback,
                     cancellation_callback,
                 )
                 .await
             }
-            UnitMetadata::Server(_) => {
+            MetadataServiceType::Rpc => {
                 sdv_rpc_client::create_subscription(
-                    self.ctx.clone().await,
-                    unit_identifier,
+                    ctx,
+                    metadata_generation.unit_identifier,
                     configuration,
-                    metadata.config_descriptor.unwrap_or(Any::descriptor()),
-                    metadata.message_descriptor,
+                    metadata_generation.metadata.get_config_descriptor_or_any(),
+                    metadata_generation.metadata.message_descriptor,
                     new_message_callback,
                     cancellation_callback,
                 )
@@ -196,12 +301,15 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(None);
         };
+        let ctx = self.ctx.clone().await;
 
-        let mut stream = self.get_unit_change_stream(service_name).await?.filter(
-            |event: &ServiceUnitChangeEvent| {
-                future::ready(matches!(event, ServiceUnitChangeEvent::Registered(_)))
-            },
-        );
+        let mutex_guard =
+            self.metadata_cache.get_or_fetch_current(ctx, service_name.clone()).await?;
+        let stream = mutex_guard.subscribe();
+        drop(mutex_guard);
+
+        let mut stream =
+            stream.filter(|metadata_generation| future::ready(metadata_generation.is_some()));
 
         let callback = Arc::clone(callback);
         let cancellation_token = CancellationToken::new();
@@ -254,85 +362,15 @@ impl CommsStackAccessor {
     ) -> Self {
         Self {
             ctx,
-            cached_metadata: Arc::new(DashMap::new()),
-            vsidl_provider: vsidl_provider_factory().shared(),
+            metadata_cache: Arc::new(MetadataCache::new(vsidl_provider_factory().shared())),
         }
     }
 
-    /// Helper for retrieving metadata.
-    /// Discovers service and parses telemetry metadata, saving it to cache.
-    /// If the service is not found, returns None
-    async fn get_or_parse_metadata(
-        &self,
-        service_name: ServiceName,
-    ) -> Result<Option<CachedMetadata>, ServicePublisherAccessorError> {
-        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| v.0.clone()) {
-            return Ok(Some(metadata));
-        }
-
-        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
-            return Ok(None);
-        };
-
-        let vsidl_provider = self.vsidl_provider.clone();
-        let Metadata { config_descriptor, message_descriptor } =
-            fetch_metadata(&service_name, &service_unit_definition, || vsidl_provider)
-                .await
-                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
-
-        match self.cached_metadata.entry(service_name) {
-            DashMapEntry::Occupied(o) => {
-                // Concurrent task has already added metadata for this service, use it instead
-                Ok(Some(o.get().0.clone()))
-            }
-            DashMapEntry::Vacant(entry) => {
-                let service_name = entry.key().clone();
-
-                let cached_metadata_clone = Arc::clone(&self.cached_metadata);
-                let service_name_clone = service_name.clone();
-
-                // Callback for invalidating this cache entry when the service becomes unavailable
-                let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-                    cached_metadata_clone.remove(&service_name_clone);
-                });
-
-                let unit_change_stream_drop_guard =
-                    self.get_unit_change_stream(service_name).await.ok().map(|stream| {
-                        let mut stream = stream.filter(|event: &ServiceUnitChangeEvent| {
-                            future::ready(matches!(
-                                event,
-                                ServiceUnitChangeEvent::Unregistered(_)
-                                    | ServiceUnitChangeEvent::Changed(_)
-                            ))
-                        });
-
-                        let cancellation_token = CancellationToken::new();
-                        let unit_change_stream_drop_guard = cancellation_token.clone().drop_guard();
-                        tokio::spawn(async move {
-                            while let Some(_event) = select! {
-                                biased;
-                                _ = cancellation_token.cancelled() => None,
-                                event = stream.next() => event,
-                            } {
-                                callback();
-                            }
-                        });
-                        unit_change_stream_drop_guard
-                    });
-
-                let metadata = CachedMetadata {
-                    service_unit_definition,
-                    config_descriptor,
-                    message_descriptor,
-                };
-                entry.insert((metadata.clone(), unit_change_stream_drop_guard));
-                Ok(Some(metadata))
-            }
-        }
-    }
-
-    async fn discover_service(&self, service_name: &ServiceName) -> Option<ServiceUnitDefinition> {
-        let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
+    pub(crate) async fn discover_service(
+        ctx: ContextRef,
+        service_name: &ServiceName,
+    ) -> Option<ServiceUnitDefinition> {
+        let sd = ServiceDiscoveryManager::new(ctx);
         match service_name {
             ServiceName::UnitTypeBased { unit_type, unit_name } => {
                 let mut units = sd
@@ -371,64 +409,6 @@ impl CommsStackAccessor {
                 .ok(),
         }
     }
-
-    async fn get_unit_change_stream(
-        &self,
-        service_name: ServiceName,
-    ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ServiceUnitChangeEvent> + Send>>> {
-        let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
-
-        Ok(match service_name {
-            ServiceName::UnitTypeBased { unit_type, unit_name } => sd
-                .subscribe_service_unit_change_by_type(&unit_type)
-                .await
-                .with_context(|| {
-                    format!("Failed to subscribe to changes for unit type {unit_type}")
-                })?
-                .filter(move |event| {
-                    future::ready(match event {
-                        ServiceUnitChangeEvent::Registered(service_unit)
-                        | ServiceUnitChangeEvent::Unregistered(service_unit)
-                        | ServiceUnitChangeEvent::Changed(service_unit) => {
-                            unit_name.as_ref().is_none_or(|unit_name| {
-                                service_unit.get_unit_identifier().get_unit_name() == unit_name
-                            })
-                        }
-                    })
-                })
-                .boxed(),
-            ServiceName::FqinBased { fqin, unit_name } => {
-                let name_args = UnitNameDiscoveryArgs::new_builder()
-                    .set_sdv_package_name(fqin.get_sdv_package_name())
-                    .set_service_bundle_name(fqin.get_service_bundle_name())
-                    .set_service_unit_name(unit_name.clone())
-                    .set_sdv_vm_name(fqin.get_sdv_vm_name())
-                    .build()
-                    .with_context(|| {
-                        format!("Failed to build UnitNameDiscoveryArgs for {fqin}|{unit_name}")
-                    })?;
-                sd.subscribe_service_unit_change_by_name(&name_args)
-                    .await
-                    .with_context(|| {
-                        format!("Failed to subscribe to changes for service {fqin}|{unit_name}")
-                    })?
-                    .filter(move |event| {
-                        future::ready(match event {
-                            ServiceUnitChangeEvent::Registered(service_unit)
-                            | ServiceUnitChangeEvent::Unregistered(service_unit)
-                            | ServiceUnitChangeEvent::Changed(service_unit) => {
-                                service_unit
-                                    .get_service_bundle_identity()
-                                    .get_fqin()
-                                    .get_service_instance_name()
-                                    == fqin.get_service_instance_name()
-                            }
-                        })
-                    })
-                    .boxed()
-            }
-        })
-    }
 }
 
 #[cfg(all(test, integration_tests))]
@@ -439,24 +419,27 @@ mod integration_tests {
     use googletest::description::Description;
     use googletest::matcher::{Matcher, MatcherBase, MatcherResult};
     use googletest::matchers::{
-        contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
+        anything, contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
         result_of, result_of_ref, some,
     };
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
     use protobuf::descriptor::FileDescriptorProto;
+    use protobuf::reflect::MessageDescriptor;
+    use protobuf::reflect::ReflectValueRef;
     use protobuf::well_known_types::empty::Empty;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::Message;
-    use protobuf::{reflect::ReflectValueRef, MessageDyn, MessageFull};
+    use protobuf::MessageDyn;
+    use protobuf::MessageFull;
     use sdv_comms::dt;
-    use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;
     use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProvider, RpcMethodDescriptor};
     use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
     use sdv_status_rs::SdvStatus;
     use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
+    use sdv_telemetry_service_publisher_accessor::ServicePublisherMessageProvider;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
     use sdv_telemetry_test_proto_bool_value::{
         test_bool_value_1::BoolValue as TestBoolValue1,
@@ -465,10 +448,10 @@ mod integration_tests {
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
-    use std::io::{BufRead, BufReader, Lines, Write};
-    use std::process::{Child, ChildStdout};
+    use std::pin::pin;
     use std::time::Duration;
     use tokio::sync::mpsc;
+    use tokio::time::sleep;
     use tokio::time::Instant;
 
     use crate::data_tunnel_publisher::DataTunnelPublisher;
@@ -512,6 +495,13 @@ mod integration_tests {
             request_message: Some(BoolValue::descriptor()),
             response_message: None
         };
+    }
+
+    async fn has_cached_metadata(
+        accessor: &CommsStackAccessor,
+        service_name: &ServiceName,
+    ) -> bool {
+        accessor.metadata_cache.has_generation(service_name).await
     }
 
     #[test]
@@ -618,6 +608,14 @@ mod integration_tests {
                 .boxed()
             },
         )
+    }
+
+    fn get_i64_field(message: Box<dyn MessageDyn>) -> i64 {
+        let field_descriptor = message.descriptor_dyn().field_by_name("value").unwrap();
+        match field_descriptor.get_singular(&*message) {
+            Some(ReflectValueRef::I64(value)) => value,
+            result => panic!("Unexpected value: {result:?}"),
+        }
     }
 
     fn get_int_field_value(message: Box<dyn MessageDyn>) -> i32 {
@@ -803,45 +801,32 @@ mod integration_tests {
         let accessor = create_accessor(ctx);
         let parsed_service_name = ServiceName::parse(&service_name).unwrap();
 
-        // Get a notification when the service is unregistered
-        let (tx, rx) = oneshot_callback();
-        let mut stream =
-            accessor.get_unit_change_stream(parsed_service_name.clone()).await.unwrap().filter(
-                |event: &ServiceUnitChangeEvent| {
-                    future::ready(matches!(event, ServiceUnitChangeEvent::Unregistered(_)))
-                },
-            );
-        tokio::spawn(async move {
-            while let Some(_event) = stream.next().await {
-                tx(());
-            }
-        });
+        let mutex_guard = accessor
+            .metadata_cache
+            .get_or_fetch_current(ctx, parsed_service_name.clone())
+            .await
+            .unwrap();
+        let mut stream = mutex_guard.subscribe();
+        drop(mutex_guard);
 
-        // Scope for the publisher, so that it gets dropped and unregistered.
-        {
-            let _publisher =
-                test_utils::register_topic(ctx, &service_name, MESSAGE_METADATA_INT32.clone())
-                    .await
-                    .unwrap();
+        assert!(pin!(stream.by_ref()).next().await.unwrap().is_none());
+        assert!(accessor.get_metadata(&service_name).await.unwrap().is_none());
+        assert!(!has_cached_metadata(&accessor, &parsed_service_name).await);
 
-            // First call to populate the cache.
-            assert!(accessor.get_metadata(&service_name).await.unwrap().is_some());
-            assert!(accessor.cached_metadata.contains_key(&parsed_service_name));
-        }
+        let publisher =
+            test_utils::register_topic(ctx, &service_name, MESSAGE_METADATA_INT32.clone())
+                .await
+                .unwrap();
+        // Wait for the cache to be populated.
+        assert!(pin!(stream.by_ref()).next().await.unwrap().is_some());
+        assert!(accessor.get_metadata(&service_name).await.unwrap().is_some());
+        assert!(has_cached_metadata(&accessor, &parsed_service_name).await);
 
+        drop(publisher);
         // Wait for an unregistration notification
-        rx.await;
-
-        // The service is unregistered, but cache invalidation task might take some time to be
-        // executed
-        loop {
-            if !accessor.cached_metadata.contains_key(&parsed_service_name) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-
-        assert!(!accessor.cached_metadata.contains_key(&parsed_service_name));
+        assert!(pin!(stream.by_ref()).next().await.unwrap().is_none());
+        assert!(accessor.get_metadata(&service_name).await.unwrap().is_none());
+        assert!(!has_cached_metadata(&accessor, &parsed_service_name).await);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -883,6 +868,19 @@ mod integration_tests {
             .unwrap();
 
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn register_availability_callback_when_topic_does_not_exist_success() {
+        let service_name = test_utils::make_unique_service_name();
+        let accessor = create_accessor_with_context();
+        let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
+
+        let outcome =
+            accessor.register_availability_callback(&service_name, &callback).await.unwrap();
+
+        assert!(outcome.is_some());
     }
 
     parameterized_test!(
@@ -1584,13 +1582,12 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_no_matching_service_exists_fails() {
-        let accessor = create_accessor_with_context();
-
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -1600,7 +1597,6 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_one_matching_service_exists_success() {
         let ctx = test_utils::make_context().await;
-        let accessor = create_accessor(ctx);
 
         let unit_type = test_utils::make_unique_unit_type();
         let _publisher1 = test_utils::register_topic(
@@ -1628,7 +1624,7 @@ mod integration_tests {
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         let service_unit_definition = result.unwrap();
         assert_eq!(service_unit_definition.get_unit_type(), unit_type);
@@ -1639,21 +1635,21 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_two_matching_services_exist_fail() {
-        let accessor = create_accessor_with_context();
+        let ctx = test_utils::make_context().await;
 
         let unit_type = test_utils::make_unique_unit_type();
-        let _publisher1 = create_publisher_in_new_process(
+        let _publisher1 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-        let _publisher2 = create_publisher_in_new_process(
+        let _publisher2 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -1662,7 +1658,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_no_matching_service_exists_fails() {
-        let accessor = create_accessor_with_context();
+        let ctx = test_utils::make_context().await;
 
         let unit_type = test_utils::make_unique_unit_type();
 
@@ -1670,7 +1666,7 @@ mod integration_tests {
             unit_type: unit_type.clone(),
             unit_name: Some(UNIT_NAME.to_owned()),
         };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -1681,7 +1677,6 @@ mod integration_tests {
     async fn discover_service_by_unit_type_and_unit_name_when_exactly_one_matching_service_exists_success(
     ) {
         let ctx = test_utils::make_context().await;
-        let accessor = create_accessor(ctx);
 
         let unit_type = test_utils::make_unique_unit_type();
         let _publisher1 = test_utils::register_topic(
@@ -1711,129 +1706,11 @@ mod integration_tests {
             unit_type: unit_type.clone(),
             unit_name: Some(UNIT_NAME.to_owned()),
         };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         let service_unit_definition = result.unwrap();
         assert_eq!(service_unit_definition.get_unit_type(), unit_type);
         assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
-    }
-
-    struct TestPublisherProxy {
-        child: Child,
-        fqin: ServiceFqin,
-        child_stdout: Lines<BufReader<ChildStdout>>,
-    }
-
-    impl TestPublisherProxy {
-        fn new(
-            child: Child,
-            fqin: ServiceFqin,
-            child_stdout: Lines<BufReader<ChildStdout>>,
-        ) -> Self {
-            Self { child, fqin, child_stdout }
-        }
-
-        fn register(&mut self) {
-            let mut stdin = self.child.stdin.as_ref().unwrap();
-            stdin.write_all(b"r").unwrap();
-            stdin.flush().unwrap();
-            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
-        }
-
-        fn unregister(&mut self) {
-            let mut stdin = self.child.stdin.as_ref().unwrap();
-            stdin.write_all(b"u").unwrap();
-            stdin.flush().unwrap();
-            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
-        }
-
-        #[expect(dead_code)]
-        fn publish(&mut self, value: u8) {
-            let mut stdin = self.child.stdin.as_ref().unwrap();
-            stdin.write_all(&[b'm', value]).unwrap();
-            stdin.flush().unwrap();
-            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
-        }
-    }
-
-    impl Drop for TestPublisherProxy {
-        fn drop(&mut self) {
-            self.unregister();
-
-            drop(self.child.stdin.take());
-            assert!(self.child.wait().unwrap().success());
-        }
-    }
-
-    enum PublisherType {
-        DataTunnel,
-        #[expect(dead_code)]
-        Rpc,
-    }
-
-    fn create_publisher_in_new_process(
-        service_name: String,
-        publisher_type: PublisherType,
-    ) -> TestPublisherProxy {
-        use std::process::Command;
-        use std::process::Stdio;
-        use std::str::FromStr;
-
-        let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
-            ServiceName::parse(&service_name).unwrap()
-        else {
-            panic!("Unsupported service name: '{service_name}'");
-        };
-        let unit_type = unit_type.to_string();
-
-        let mut args = vec![
-            "--fqin",
-            // Tests may run in multiple parallel processes, therefore we need to ensure that
-            // the FQINs created by the processes do not conflict with each other. This is
-            // achieved by embedding the process ID into the FQIN, which is done by the
-            // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
-            // `__PROCESS_ID__` placeholder with its process ID.
-            "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
-            "--unit-type",
-            &unit_type,
-            "--unit-name",
-            &unit_name,
-        ];
-        match publisher_type {
-            PublisherType::DataTunnel => {
-                args.extend(["data-tunnel", "--message-queue-size", "100"])
-            }
-            PublisherType::Rpc => args.extend(["rpc"]),
-        }
-        eprintln!("Spwaning publisher process with args: {args:?}");
-        let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // Print child process errors to the test's stderr.
-            .stderr(Stdio::inherit())
-            .args(args)
-            .spawn()
-            .unwrap();
-
-        let mut child_stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-        let child_fqin = child_stdout
-            .find_map(|line| {
-                let line = line.unwrap();
-                let (command, payload) = line.split_once(":")?;
-                if command == "fqin" {
-                    Some(payload.to_owned())
-                } else {
-                    None
-                }
-            })
-            .unwrap();
-        let child_fqin = ServiceFqin::from_str(&child_fqin)
-            .with_context(|| format!("Failed to parse child FQIN '{child_fqin}'"))
-            .unwrap();
-
-        let mut publisher = TestPublisherProxy::new(child, child_fqin, child_stdout);
-        publisher.register();
-        publisher
     }
 
     // Unit Type + Unit Name -> 2 matches
@@ -1841,26 +1718,25 @@ mod integration_tests {
     #[googletest::test]
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_two_matching_service_exists_fails() {
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let _publisher1 = create_publisher_in_new_process(
+        let _publisher1 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-        let _publisher2 = create_publisher_in_new_process(
+        let _publisher2 = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-
-        let accessor = create_accessor_with_context();
 
         let service_name = ServiceName::UnitTypeBased {
             unit_type: unit_type.clone(),
             unit_name: Some(UNIT_NAME.to_owned()),
         };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -1870,19 +1746,18 @@ mod integration_tests {
     #[googletest::test]
     #[tokio::test]
     async fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(
+        let publisher = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|different-name"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-
-        let accessor = create_accessor_with_context();
 
         let service_name = ServiceName::FqinBased {
             fqin: publisher.fqin.clone(),
             unit_name: UNIT_NAME.to_owned(),
         };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -1892,19 +1767,18 @@ mod integration_tests {
     #[googletest::test]
     #[tokio::test]
     async fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(
+        let publisher = test_utils::create_publisher_in_new_process(
             format!("{unit_type}|{UNIT_NAME}"),
-            PublisherType::DataTunnel,
+            test_utils::PublisherType::DataTunnel,
         );
-
-        let accessor = create_accessor_with_context();
 
         let service_name = ServiceName::FqinBased {
             fqin: publisher.fqin.clone(),
             unit_name: UNIT_NAME.to_owned(),
         };
-        let result = accessor.discover_service(&service_name).await;
+        let result = CommsStackAccessor::discover_service(ctx, &service_name).await;
 
         let service_unit_definition = result.unwrap();
         assert_eq!(service_unit_definition.get_unit_type(), unit_type);
@@ -2105,12 +1979,14 @@ mod integration_tests {
         let accessor_clone = Arc::clone(&accessor);
         let parsed_service_name_clone = parsed_service_name.clone();
         let cancellation_callback = Box::new(move || {
-            // Check that metadata is cleared from cache
-            expect_that!(
-                accessor_clone.cached_metadata.contains_key(&parsed_service_name_clone),
-                is_false()
-            );
-            tx(());
+            tokio::spawn(async move {
+                // Check that metadata is cleared from cache
+                expect_that!(
+                    has_cached_metadata(&accessor_clone, &parsed_service_name_clone).await,
+                    is_false()
+                );
+                tx(());
+            });
         });
 
         let publisher =
@@ -2123,7 +1999,7 @@ mod integration_tests {
             accessor.get_metadata(&service_name).await,
             ok(some(pat!(ServicePublisherMetadata { .. })))
         );
-        expect_that!(accessor.cached_metadata.contains_key(&parsed_service_name), is_true());
+        expect_that!(has_cached_metadata(&accessor, &parsed_service_name).await, is_true());
 
         let outcome = accessor
             .create_subscription(
@@ -2147,4 +2023,133 @@ mod integration_tests {
 
         expect_that!(accessor.get_metadata(&service_name).await, ok(none()));
     }
+
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout]
+        #[googletest::test]
+        #[tokio::test]
+        get_message_provider_works_after_publisher_is_interrupted,
+
+        |initial_publisher_type, interruption_action| async move {
+            // Start binder thread pool to receive notification from Service Discovery
+            binder::ProcessState::start_thread_pool();
+
+            let service_name = test_utils::make_unique_service_name();
+            let mut publisher = test_utils::create_publisher_in_new_process(service_name.clone(), initial_publisher_type);
+
+            let accessor = create_accessor_with_context();
+            let outcome = accessor.get_message_provider(&service_name).await.unwrap();
+            let GetMessageProviderOutcome::Success(provider) = outcome else {
+                panic!("Unexpected outcome: {outcome:?}");
+            };
+
+            publisher.publish(1);
+            let msg = provider.get_latest_message(None).await.unwrap().unwrap();
+            expect_that!(get_i64_field(msg), eq(1));
+
+            let mut publisher = interruption_action(publisher, provider.as_ref(), service_name).await;
+
+            publisher.publish(2);
+
+            let mut msg = None;
+            for _ in 0..10 {
+                // This may fail intermittently until we have processed the publisher re-creation
+                // and connected to it again.
+                let result = provider.get_latest_message(None).await;
+                if let Ok(result) = result {
+                    msg = result;
+                    break;
+                } else {
+                    sleep(Duration::from_millis(50)).await;
+                }
+            }
+            expect_that!(get_i64_field(msg.unwrap()), eq(2));
+        },
+
+        dt_unregistered_and_reregistered: (
+            test_utils::PublisherType::DataTunnel,
+            async |mut publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, _service_name: String| {
+                publisher.unregister();
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from unregistered publisher"
+                );
+                publisher.register();
+                publisher
+             }
+        ),
+        dt_killed_and_restarted: (
+            test_utils::PublisherType::DataTunnel,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::DataTunnel)
+             }
+        ),
+        dt_killed_and_restarted_as_rpc: (
+            test_utils::PublisherType::DataTunnel,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::Rpc)
+             }
+        ),
+
+        rpc_unregistered_and_reregistered: (
+            test_utils::PublisherType::Rpc,
+            async |mut publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, _service_name: String| {
+                publisher.unregister();
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from unregistered publisher"
+                );
+                publisher.register();
+                publisher
+             }
+        ),
+        rpc_killed_and_restarted: (
+            test_utils::PublisherType::Rpc,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::Rpc)
+             }
+        ),
+        rpc_killed_and_restarted_as_dt: (
+            test_utils::PublisherType::Rpc,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::DataTunnel)
+             }
+        ),
+    );
 }
