@@ -57,6 +57,7 @@ pub struct ConfigurablePublisherRegistry {
     publisher_entries: DashMap<String, PublisherEntry>,
 }
 
+#[derive(Debug)]
 pub struct ConfigurablePublisherRegistrySubscription {
     /// The underlying configurable publisher subscription.
     configurable_publisher_subscription: binder::Strong<dyn IConfigurablePublisherSubscription>,

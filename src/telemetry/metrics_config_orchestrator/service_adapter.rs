@@ -95,10 +95,12 @@ pub(crate) trait ServiceMessageProvider: Send + Sync {
 }
 
 /// Stores details about a service subscription.
+#[cfg_attr(test, derive(Debug))]
 pub(crate) struct ServiceSubscription {
     subscription_type: ServiceSubscriptionType,
 }
 
+#[cfg_attr(test, derive(Debug))]
 enum ServiceSubscriptionType {
     /// Subscription with configuration that can't be shared.
     Configured {

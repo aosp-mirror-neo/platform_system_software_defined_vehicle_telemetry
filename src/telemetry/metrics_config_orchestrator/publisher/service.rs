@@ -57,7 +57,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
-#[derive(strum_macros::Display)]
+#[derive(Debug, strum_macros::Display)]
 #[strum(serialize_all = "title_case")]
 pub(crate) enum ConnectionType {
     Subscription,

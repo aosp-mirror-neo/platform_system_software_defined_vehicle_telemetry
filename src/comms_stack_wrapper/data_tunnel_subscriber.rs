@@ -53,6 +53,7 @@ const GET_PUBLICATION_DESCRIPTOR_TIMEOUT: Duration = Duration::from_secs(10);
 const GET_PUBLICATION_DESCRIPTOR_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Struct for subscription of DT topic.
+#[derive(Debug)]
 struct DataTunnelSubscription {
     _subscription_drop_guard: DropGuard,
 }
