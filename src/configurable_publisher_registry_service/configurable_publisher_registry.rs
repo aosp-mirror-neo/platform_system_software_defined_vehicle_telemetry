@@ -428,7 +428,9 @@ mod tests {
     use protobuf::{Message, MessageFull};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::parameterized_test;
+    use sdv_telemetry_test_utils::match_unwrap;
     use googletest::expect_that;
     use googletest::matchers::{err, ok, eq, pat};
 
@@ -679,10 +681,7 @@ mod tests {
 
         let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -694,10 +693,7 @@ mod tests {
 
         let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -711,9 +707,10 @@ mod tests {
             create_registry_and_register_publisher(configurable_publisher.clone()).await;
 
         let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
-        let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
-            panic!("Unexpected outcome: {outcome:?}")
-        };
+        let message_provider = match_unwrap!(
+            outcome,
+            Ok(GetMessageProviderOutcome::Success(message_provider)) => message_provider
+        );
         let res = message_provider
             .get_latest_message(Some(&Any::pack(&config).unwrap()))
             .await
@@ -765,13 +762,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let CreateSubscriptionOutcome::Subscribed {
-                subscription: _,
-                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-            } = outcome
-            else {
-                panic!("Unexpected outcome")
-            };
+            assert_matches!(
+                outcome,
+                CreateSubscriptionOutcome::Subscribed {
+                    subscription: _,
+                    fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+                }
+            );
 
             assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
             assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
@@ -798,7 +795,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered { .. }));
+        assert_matches!(res, CreateSubscriptionOutcome::NotRegistered { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -819,13 +816,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let CreateSubscriptionOutcome::Subscribed {
-            subscription,
-            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-        } = outcome
-        else {
-            panic!("Unexpected outcome")
-        };
+        let subscription = match_unwrap!(
+            outcome,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+            } => subscription
+        );
         subscription.unsubscribe().await;
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
@@ -850,13 +847,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let CreateSubscriptionOutcome::Subscribed {
-            subscription: _,
-            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-        } = outcome
-        else {
-            panic!("Unexpected outcome")
-        };
+        assert_matches!(
+            outcome,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+            }
+        );
 
         configurable_publisher_registry.unregister_publisher(SERVICE_NAME).await.unwrap();
 
@@ -884,13 +881,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let CreateSubscriptionOutcome::Subscribed {
-            subscription: _,
-            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-        } = outcome
-        else {
-            panic!("Unexpected outcome")
-        };
+        assert_matches!(
+            outcome,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+            }
+        );
 
         let res = configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await;
 

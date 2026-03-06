@@ -335,6 +335,7 @@ mod tests {
     use sdv_telemetry_service_publisher_accessor::{
         AvailabilityCallbackRegistration, CancellationCallback, ServicePublisherAccessorError,
     };
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::collections::HashMap;
@@ -582,7 +583,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&PublisherProto::default()).err().unwrap();
 
-        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {err:?}");
+        assert_matches!(&err, PublisherFactoryError::NameNotSet);
     }
 
     #[test]
@@ -592,10 +593,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&publisher).err().unwrap();
 
-        assert!(
-            matches!(&err, PublisherFactoryError::InvalidConnectionType { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, PublisherFactoryError::InvalidConnectionType { .. });
     }
 
     #[test]
@@ -606,7 +604,7 @@ mod tests {
 
         let _res = factory.create_using_default_context(&publisher).unwrap();
 
-        assert!(matches!(data_holder.get().unwrap().connection_type, ConnectionType::Subscription));
+        assert_matches!(data_holder.get().unwrap().connection_type, ConnectionType::Subscription);
     }
 
     parameterized_test!(
@@ -617,10 +615,7 @@ mod tests {
             let factory = create_default_factory();
             let err = factory.create_using_default_context(&publisher).err().unwrap();
 
-            assert!(
-                matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. }),
-                "Unexpected error: {err:?}"
-            );
+            assert_matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. });
         },
 
         negative_sub_sampling_interval_fails: (create_service_publisher_with_negative_sub_sampling_interval(),),
@@ -646,7 +641,7 @@ mod tests {
             .unwrap()
             .expect("The value of Any should be an Empty");
         assert_eq!(&any_value, Empty::default_instance());
-        assert!(matches!(data_holder_value.connection_type, ConnectionType::Subscription));
+        assert_matches!(data_holder_value.connection_type, ConnectionType::Subscription);
         assert!(data_holder_value.fetch_last_message);
         assert_eq!(data_holder_value.service_name, SERVICE_NAME);
         assert_eq!(
@@ -664,7 +659,7 @@ mod tests {
 
         let err = factory.create_using_context_with(&publisher, Some(vec![trigger])).err().unwrap();
 
-        assert!(matches!(&err, PublisherFactoryError::InvalidProtoMessageBuilder { .. }));
+        assert_matches!(&err, PublisherFactoryError::InvalidProtoMessageBuilder { .. });
     }
 
     #[test]
@@ -691,7 +686,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&PublisherProto::default()).unwrap_err();
 
-        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {err:?}");
+        assert_matches!(&err, PublisherFactoryError::NameNotSet);
     }
 
     #[test]
@@ -701,10 +696,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&publisher).unwrap_err();
 
-        assert!(
-            matches!(&err, PublisherFactoryError::InvalidConnectionType { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, PublisherFactoryError::InvalidConnectionType { .. });
     }
 
     #[test]
@@ -723,10 +715,7 @@ mod tests {
             let factory = create_default_factory();
             let err = factory.validate_using_default_context(&publisher).unwrap_err();
 
-            assert!(
-                matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. }),
-                "Unexpected error: {err:?}"
-            );
+            assert_matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. });
         },
 
         negative_sub_sampling_interval_fails: (create_service_publisher_with_negative_sub_sampling_interval(),),
@@ -750,7 +739,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&publisher).unwrap_err();
 
-        assert!(matches!(&err, PublisherFactoryError::InvalidProtoMessageBuilder { .. }));
+        assert_matches!(&err, PublisherFactoryError::InvalidProtoMessageBuilder { .. });
     }
 
     #[test]

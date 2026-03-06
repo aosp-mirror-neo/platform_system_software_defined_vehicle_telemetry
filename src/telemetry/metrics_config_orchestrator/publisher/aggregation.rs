@@ -369,6 +369,7 @@ mod tests {
     use sdv_telemetry_expr::dynamic_message::DynamicMessage;
     use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::Arc};
 
@@ -735,8 +736,9 @@ mod tests {
 
         // Wait for error status to be delivered.
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
+        assert_matches!(
+            &status,
+            TelemetryServiceStatus {
                 id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR,
                 message,
@@ -744,8 +746,10 @@ mod tests {
                     AggregationPublisherErrorDetails { metricsConfigUUID, publisherName, fieldName }
                 ),
             }
-            if message.contains("failed to build message") && *metricsConfigUUID == CONFIG_UUID.to_string() && publisherName == PUBLISHER_NAME && fieldName == FIELD_NAME),
-            "Unexpected status: {status:?}"
+            if message.contains("failed to build message")
+                && *metricsConfigUUID == CONFIG_UUID.to_string()
+                && publisherName == PUBLISHER_NAME
+                && fieldName == FIELD_NAME
         );
     }
 }

@@ -1139,6 +1139,8 @@ mod tests {
         Trigger as TriggerProto,
     };
     use sdv_telemetry_test_proto::test_message;
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback, parameterized_test};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -2068,9 +2070,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateSourceDefinition { source_name } if source_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateSourceDefinition { source_name }
+            if source_name == SOME_PUBLISHER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2083,9 +2086,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name }
+            if trigger_name == SOME_TRIGGER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2098,9 +2102,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name }
+            if trigger_name == SOME_PUBLISHER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2113,10 +2118,7 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::CycledSourcesTriggers),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::CycledSourcesTriggers);
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
@@ -2128,9 +2130,13 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency {
+                dependency_name,
+                dependency_type
+            }
+            if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2143,9 +2149,13 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == SOURCE),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency {
+                dependency_name,
+                dependency_type
+            }
+            if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == SOURCE
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2158,9 +2168,13 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency {
+                dependency_name,
+                dependency_type
+            }
+            if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2173,9 +2187,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name }
+            if name == METRICS_REPORT_CONFIG_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2189,9 +2204,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config2).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == &*CONFIG_UUID),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid }
+            if uuid == &*CONFIG_UUID
         );
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
@@ -2208,10 +2224,7 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. });
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
@@ -2226,9 +2239,12 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidSourceDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, source_name } if source_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidSourceDefinition {
+                factory_error: PublisherFactoryError::UnknownPublisherType,
+                source_name
+            } if source_name == SOME_PUBLISHER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2245,9 +2261,12 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidTriggerDefinition {
+                        factory_error: TriggerFactoryError::UnknownTriggerType,
+                        trigger_name
+            } if trigger_name == SOME_TRIGGER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2265,17 +2284,18 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
-            report_config_name,
-            factory_error,
-        } = err
-        else {
-            panic!("Unexpected error: {err:?}");
-        };
+        let (report_config_name, factory_error) = match_unwrap!(
+            err,
+            MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+                report_config_name,
+                factory_error,
+            } => (report_config_name, factory_error)
+        );
         assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
-        assert!(
-            matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {factory_error:?}"
+        assert_matches!(
+            &factory_error,
+            MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name }
+                if trigger_name == SOME_TRIGGER_NAME
         );
     }
 
@@ -2353,10 +2373,7 @@ mod tests {
         };
         assert_eq!(config.publishers.len(), 2);
         let config_state = config.state.lock().await;
-        assert!(
-            matches!(&*config_state, MetricsConfigState::Running),
-            "Unexpected config state: {config_state:?}"
-        );
+        assert_matches!(&*config_state, MetricsConfigState::Running);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -2370,9 +2387,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER
         );
     }
 
@@ -2387,9 +2405,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER
         );
     }
 
@@ -2404,9 +2423,10 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER
         );
     }
 
@@ -2419,10 +2439,7 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -2556,10 +2573,7 @@ mod tests {
         assert_eq!(*factory_calls.lock(), expected_calls);
         let config = { Arc::clone(&orchestrator.configs.lock()[&*CONFIG_UUID]) };
         let config_state = config.state.lock().await;
-        assert!(
-            matches!(&*config_state, MetricsConfigState::NotStarted),
-            "Unexpected config state: {config_state:?}"
-        );
+        assert_matches!(&*config_state, MetricsConfigState::NotStarted);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -2596,10 +2610,7 @@ mod tests {
         assert_eq!(num_calls.load(Ordering::Acquire), 1);
         let config = { Arc::clone(&orchestrator.configs.lock()[&*CONFIG_UUID]) };
         let config_state = config.state.lock().await;
-        assert!(
-            matches!(&*config_state, MetricsConfigState::Running),
-            "Unexpected config state: {config_state:?}"
-        );
+        assert_matches!(&*config_state, MetricsConfigState::Running);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -2939,9 +2950,9 @@ mod tests {
 
         let err = orchestrator.finish_config(&CONFIG_UUID).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::MetricsConfigNotFound { uuid } if uuid == &*CONFIG_UUID),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::MetricsConfigNotFound { uuid } if uuid == &*CONFIG_UUID
         )
     }
 
@@ -3055,11 +3066,7 @@ mod tests {
         // Verify config state.
         {
             let config_state = metrics_config.state.lock().await;
-            assert!(
-                matches!(*config_state, MetricsConfigState::Finished),
-                "Unexpected state: {:?}",
-                *config_state
-            );
+            assert_matches!(*config_state, MetricsConfigState::Finished);
         }
 
         // Verify that the config was removed from the map.
@@ -3203,11 +3210,7 @@ mod tests {
         // Verify config state.
         {
             let config_state = metrics_config.state.lock().await;
-            assert!(
-                matches!(*config_state, MetricsConfigState::Finished),
-                "Unexpected state: {:?}",
-                *config_state
-            );
+            assert_matches!(*config_state, MetricsConfigState::Finished);
         }
 
         // Verify that the config was removed from the map.
@@ -3346,10 +3349,7 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -3360,9 +3360,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateSourceDefinition { source_name } if source_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateSourceDefinition { source_name }
+            if source_name == SOME_PUBLISHER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3375,9 +3376,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name }
+            if trigger_name == SOME_TRIGGER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3390,9 +3392,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name }
+            if trigger_name == SOME_PUBLISHER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3405,10 +3408,7 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::CycledSourcesTriggers),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::CycledSourcesTriggers);
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
@@ -3420,9 +3420,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3435,9 +3436,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == SOURCE),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == SOURCE
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3450,9 +3452,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3465,9 +3468,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name }
+                if name == METRICS_REPORT_CONFIG_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3481,9 +3485,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config2).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == &*CONFIG_UUID),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid }
+                if uuid == &*CONFIG_UUID
         );
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
@@ -3500,10 +3505,7 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. });
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
@@ -3518,9 +3520,12 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidSourceDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, source_name } if source_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidSourceDefinition {
+                factory_error: PublisherFactoryError::UnknownPublisherType,
+                source_name
+            } if source_name == SOME_PUBLISHER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3536,9 +3541,12 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidTriggerDefinition {
+                factory_error: TriggerFactoryError::UnknownTriggerType,
+                trigger_name
+            } if trigger_name == SOME_TRIGGER_NAME
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3556,17 +3564,18 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
-            report_config_name,
-            factory_error,
-        } = err
-        else {
-            panic!("Unexpected error: {err:?}");
-        };
+        let (report_config_name, factory_error) = match_unwrap!(
+            err,
+            MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+                report_config_name,
+                factory_error,
+            } => (report_config_name, factory_error)
+        );
         assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
-        assert!(
-            matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {factory_error:?}"
+        assert_matches!(
+            &factory_error,
+            MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name }
+            if trigger_name == SOME_TRIGGER_NAME
         );
     }
 
@@ -3619,9 +3628,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER
         );
     }
 
@@ -3636,9 +3646,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER
         );
     }
 
@@ -3653,9 +3664,10 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type }
+            if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER
         );
     }
 
@@ -3668,9 +3680,6 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined);
     }
 }

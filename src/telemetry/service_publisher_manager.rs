@@ -160,6 +160,8 @@ mod tests {
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::MessageFull;
     use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use std::sync::Arc;
 
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
@@ -229,10 +231,7 @@ mod tests {
 
         let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::Success(_))),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::Success(_)));
 
         assert_eq!(service_publisher.get_num_get_message_provider_calls(), 1);
     }
@@ -264,10 +263,7 @@ mod tests {
 
         let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -281,10 +277,7 @@ mod tests {
 
         let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -300,10 +293,7 @@ mod tests {
 
         let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -379,7 +369,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered { .. }));
+        assert_matches!(res, CreateSubscriptionOutcome::NotRegistered { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -403,13 +393,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let CreateSubscriptionOutcome::Subscribed {
-            subscription,
-            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-        } = outcome
-        else {
-            panic!("Unexpected outcome")
-        };
+        let subscription = match_unwrap!(
+            outcome,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+            } => subscription
+        );
         subscription.unsubscribe().await;
 
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);

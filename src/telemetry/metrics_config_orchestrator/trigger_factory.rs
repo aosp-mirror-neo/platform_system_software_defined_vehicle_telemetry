@@ -596,6 +596,8 @@ mod tests {
         DataSource as ServicePublisherProto,
     };
     use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
@@ -831,7 +833,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&TriggerProto::default()).err().unwrap();
 
-        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {err:?}");
+        assert_matches!(&err, TriggerFactoryError::NameNotSet);
     }
 
     #[test]
@@ -841,10 +843,7 @@ mod tests {
         // TODO(b/339033786): We cannot use `unwrap_err` here.
         let err = factory.create_using_default_context(&new_trigger(TRIGGER_NAME)).err().unwrap();
 
-        assert!(
-            matches!(&err, TriggerFactoryError::UnspecifiedTriggerType),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, TriggerFactoryError::UnspecifiedTriggerType);
     }
 
     #[test]
@@ -876,9 +875,10 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, TriggerFactoryError::UnableToListenToSourceOnDemand { source_name } if source_name == PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            TriggerFactoryError::UnableToListenToSourceOnDemand { source_name }
+            if source_name == PUBLISHER_NAME
         );
     }
 
@@ -941,15 +941,12 @@ mod tests {
             MessageField::some(DurationProto { seconds: 0, nanos: 0, ..Default::default() });
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
-        assert!(
-            matches!(
-                err,
-                TriggerFactoryError::PeriodicTriggerInvalidDuration {
-                    interval: DurationProto { seconds: 0, nanos: 0, .. },
-                    ..
-                }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            err,
+            TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                interval: DurationProto { seconds: 0, nanos: 0, .. },
+                ..
+            }
         );
     }
 
@@ -963,15 +960,12 @@ mod tests {
             MessageField::some(DurationProto { seconds: -1, nanos: 0, ..Default::default() });
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
-        assert!(
-            matches!(
-                err,
-                TriggerFactoryError::PeriodicTriggerInvalidDuration {
-                    interval: DurationProto { seconds: -1, nanos: 0, .. },
-                    ..
-                }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            err,
+            TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                interval: DurationProto { seconds: -1, nanos: 0, .. },
+                ..
+            }
         );
     }
 
@@ -982,7 +976,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
 
-        assert!(matches!(err, TriggerFactoryError::NoParentTriggers), "Unexpected error: {err:?}");
+        assert_matches!(err, TriggerFactoryError::NoParentTriggers);
     }
 
     #[test]
@@ -992,7 +986,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
 
-        assert!(matches!(err, TriggerFactoryError::MissingNodeIndex), "Unexpected error: {err:?}");
+        assert_matches!(err, TriggerFactoryError::MissingNodeIndex);
     }
 
     #[test]
@@ -1002,10 +996,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
 
-        assert!(
-            matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX });
     }
 
     #[test]
@@ -1024,10 +1015,7 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto);
     }
 
     parameterized_test!(
@@ -1363,13 +1351,13 @@ mod tests {
             assert_that!(data.condition_type, matcher);
 
             // Verify that initial expression inside the enum points to the correct node (index 1)
-            let result_expression = match &data.condition_type {
+            let result_expression = match_unwrap!(
+                &data.condition_type,
                 ConditionType::RisingEdge { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } |
                 ConditionType::FallingEdge { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } |
                 ConditionType::AllChanges { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } |
-                ConditionType::BothEdges { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } => expr,
-                _ => panic!("initial expression should be set"),
-            };
+                ConditionType::BothEdges { first_value_policy: FirstValuePolicy::CompareTo { node: expr }, .. } => expr
+            );
 
             assert!(Arc::ptr_eq(result_expression, &initial_expression));
         },
@@ -1731,7 +1719,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&TriggerProto::default()).unwrap_err();
 
-        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {err:?}");
+        assert_matches!(&err, TriggerFactoryError::NameNotSet);
     }
 
     #[test]
@@ -1740,10 +1728,7 @@ mod tests {
 
         let result = factory.validate_using_default_context(&new_trigger(TRIGGER_NAME));
 
-        assert!(
-            matches!(&result, Err(TriggerFactoryError::UnspecifiedTriggerType)),
-            "Unexpected result: {result:?}"
-        );
+        assert_matches!(&result, Err(TriggerFactoryError::UnspecifiedTriggerType));
     }
 
     #[test]
@@ -1764,9 +1749,10 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, TriggerFactoryError::UnableToListenToSourceOnDemand { source_name } if source_name == PUBLISHER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            TriggerFactoryError::UnableToListenToSourceOnDemand { source_name }
+            if source_name == PUBLISHER_NAME
         );
     }
 
@@ -1803,10 +1789,7 @@ mod tests {
 
         let result = factory.validate_using_default_context(&trigger);
 
-        assert!(
-            matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. })),
-            "Unexpected result: {result:?}"
-        );
+        assert_matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. }));
     }
 
     #[test]
@@ -1818,10 +1801,7 @@ mod tests {
 
         let result = factory.validate_using_default_context(&trigger);
 
-        assert!(
-            matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. })),
-            "Unexpected result: {result:?}"
-        );
+        assert_matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. }));
     }
 
     #[test]
@@ -1851,7 +1831,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
-        assert!(matches!(err, TriggerFactoryError::NoParentTriggers), "Unexpected error: {err:?}");
+        assert_matches!(err, TriggerFactoryError::NoParentTriggers);
     }
 
     #[test]
@@ -1861,7 +1841,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
-        assert!(matches!(err, TriggerFactoryError::MissingNodeIndex), "Unexpected error: {err:?}");
+        assert_matches!(err, TriggerFactoryError::MissingNodeIndex);
     }
 
     #[test]
@@ -1871,10 +1851,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
-        assert!(
-            matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX });
     }
 
     #[test]
@@ -1884,10 +1861,7 @@ mod tests {
 
         let err = factory.validate_using_context_with(&trigger, vec![None], None).unwrap_err();
 
-        assert!(
-            matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto);
     }
 
     #[test]

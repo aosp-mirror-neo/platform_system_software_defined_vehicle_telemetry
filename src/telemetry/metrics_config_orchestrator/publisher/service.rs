@@ -756,6 +756,7 @@ mod tests {
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::sync::Arc;
 
@@ -1222,8 +1223,9 @@ mod tests {
 
         // Wait for error status to be delivered
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
+        assert_matches!(
+            &status,
+            TelemetryServiceStatus {
                 id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR,
                 message,
@@ -1231,8 +1233,10 @@ mod tests {
                     ServicePublisherErrorDetails { metricsConfigUUID, publisherName }
                 ),
             }
-            if message.contains("failed to retry activation") && message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && publisherName == PUBLISHER_NAME),
-            "Unexpected status: {status:?}"
+            if message.contains("failed to retry activation")
+                && message.contains(ERROR_MESSAGE)
+                && *metricsConfigUUID == CONFIG_UUID.to_string()
+                && publisherName == PUBLISHER_NAME
         );
     }
 
@@ -1388,19 +1392,21 @@ mod tests {
 
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
-        assert!(matches!(*publisher.state.lock().await,
+        assert_matches!(
+            *publisher.state.lock().await,
             ServicePublisherState::ActiveSubscribed { ref callback_map, .. }
-                if callback_map.contains_key(DATA_TRIGGER_NAME)
-        ));
+            if callback_map.contains_key(DATA_TRIGGER_NAME)
+        );
 
         let rx = service_adapter.set_next_subscribe_successful();
         service_adapter.notify_cancelled();
         rx.await.unwrap();
 
-        assert!(matches!(*publisher.state.lock().await,
+        assert_matches!(
+            *publisher.state.lock().await,
             ServicePublisherState::ActiveSubscribed { ref callback_map, .. }
-                if callback_map.contains_key(DATA_TRIGGER_NAME)
-        ));
+            if callback_map.contains_key(DATA_TRIGGER_NAME)
+        );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
     }
@@ -1422,18 +1428,20 @@ mod tests {
 
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
-        assert!(matches!(*publisher.state.lock().await,
+        assert_matches!(
+            *publisher.state.lock().await,
             ServicePublisherState::PendingActivation { ref callback_map, .. }
-                if callback_map.contains_key(DATA_TRIGGER_NAME)
-        ));
+            if callback_map.contains_key(DATA_TRIGGER_NAME)
+        );
 
         // Wait for retry to trigger transition to PendingService
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        assert!(matches!(*publisher.state.lock().await,
+        assert_matches!(
+            *publisher.state.lock().await,
             ServicePublisherState::PendingService { ref callback_map, .. }
-                if callback_map.contains_key(DATA_TRIGGER_NAME)
-        ));
+            if callback_map.contains_key(DATA_TRIGGER_NAME)
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1447,19 +1455,21 @@ mod tests {
 
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
-        assert!(matches!(*publisher.state.lock().await,
+        assert_matches!(
+            *publisher.state.lock().await,
             ServicePublisherState::PendingService { ref callback_map, .. }
-                if callback_map.contains_key(DATA_TRIGGER_NAME)
-        ));
+            if callback_map.contains_key(DATA_TRIGGER_NAME)
+        );
 
         let rx = service_adapter.set_next_subscribe_successful();
         service_adapter.call_availability_callback();
         rx.await.unwrap();
 
-        assert!(matches!(*publisher.state.lock().await,
+        assert_matches!(
+            *publisher.state.lock().await,
             ServicePublisherState::ActiveSubscribed { ref callback_map, .. }
-                if callback_map.contains_key(DATA_TRIGGER_NAME)
-        ));
+            if callback_map.contains_key(DATA_TRIGGER_NAME)
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1480,8 +1490,9 @@ mod tests {
 
         // Wait for error status to be delivered.
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
+        assert_matches!(
+            &status,
+            TelemetryServiceStatus {
                 id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR,
                 message,
@@ -1489,8 +1500,9 @@ mod tests {
                     ServicePublisherErrorDetails { metricsConfigUUID, publisherName }
                 ),
             }
-            if message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && publisherName == PUBLISHER_NAME),
-            "Unexpected status: {status:?}"
+            if message.contains(ERROR_MESSAGE)
+                && *metricsConfigUUID == CONFIG_UUID.to_string()
+                && publisherName == PUBLISHER_NAME
         );
     }
 

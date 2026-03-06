@@ -41,6 +41,7 @@ mod tests {
 
     use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
 
     const PUBLISHER_1: &str = "pub_1";
     const PUBLISHER_2: &str = "pub_2";
@@ -70,9 +71,6 @@ mod tests {
 
         let err = descriptor_provider.get_descriptor(PUBLISHER_2).unwrap_err();
 
-        assert!(
-            matches!(&err, DescriptorProviderError::InvalidPublisherName),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(&err, DescriptorProviderError::InvalidPublisherName);
     }
 }

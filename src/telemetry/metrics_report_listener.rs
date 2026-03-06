@@ -170,6 +170,7 @@ pub(crate) mod tests {
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::BnTelemetryReportReadyListener;
     use parking_lot::Mutex;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
+    use sdv_telemetry_test_utils::assert_matches;
     use uuid::Uuid;
 
     #[derive(Clone)]
@@ -289,7 +290,7 @@ pub(crate) mod tests {
         // Check that the FIFO report was removed.
         let fifo_report_uuid = report_uuids.first().unwrap();
         let err = report_listener.get_metrics_report(fifo_report_uuid).unwrap_err();
-        assert!(matches!(err, MetricsReportListenerError::MetricsReportNotFound));
+        assert_matches!(err, MetricsReportListenerError::MetricsReportNotFound);
 
         // Check that the last added report still exists.
         let last_report_uuid = report_uuids.last().unwrap();
@@ -335,7 +336,7 @@ pub(crate) mod tests {
         // Check that the second-in report was removed.
         let uuid = &report_uuids[1];
         let err = report_listener.get_metrics_report(uuid).unwrap_err();
-        assert!(matches!(err, MetricsReportListenerError::MetricsReportNotFound));
+        assert_matches!(err, MetricsReportListenerError::MetricsReportNotFound);
         assert_eq!(
             report_listener.metrics_report_store.lock().len(),
             MAX_METRICS_REPORT_STORE_SIZE
@@ -361,10 +362,7 @@ pub(crate) mod tests {
 
         let err = report_listener.get_metrics_report(&metrics_report.report_uuid).unwrap_err();
 
-        assert!(
-            matches!(err, MetricsReportListenerError::MetricsReportNotFound),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, MetricsReportListenerError::MetricsReportNotFound);
     }
 
     #[test]
@@ -391,10 +389,7 @@ pub(crate) mod tests {
 
         let err = report_listener.set_report_ready_listener(binder_listener).unwrap_err();
 
-        assert!(
-            matches!(err, MetricsReportListenerError::ReportReadyListenerExists),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, MetricsReportListenerError::ReportReadyListenerExists);
     }
 
     #[test]

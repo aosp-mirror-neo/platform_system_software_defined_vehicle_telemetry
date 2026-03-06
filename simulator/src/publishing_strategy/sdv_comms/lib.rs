@@ -112,6 +112,7 @@ mod tests {
     use protobuf::MessageFull;
     use rand::RngCore;
     use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition, UnitRegistrationArgs};
+    use sdv_telemetry_test_utils::match_unwrap;
     use sdv_telemetry_test_utils::{downcast_ref, parameterized_test};
     use std::str::FromStr;
 
@@ -153,9 +154,10 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
 
-        let [ref service_unit] = service_units[..] else {
-            panic!("Expected exactly one service unit, but got: {service_units:?}");
-        };
+        let service_unit = match_unwrap!(
+            service_units[..],
+            [ref service_unit] => service_unit
+        );
         service_unit.to_owned()
     }
 

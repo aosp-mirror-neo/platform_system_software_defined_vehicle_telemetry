@@ -565,6 +565,8 @@ pub(super) mod tests {
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageFull;
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use sdv_telemetry_test_utils::oneshot_callback;
     use tokio::sync::mpsc;
 
@@ -631,10 +633,7 @@ pub(super) mod tests {
 
         let outcome = service_adapter.get_message_provider(SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -643,11 +642,10 @@ pub(super) mod tests {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
-        let GetMessageProviderOutcome::Success(provider) =
-            service_adapter.get_message_provider(SERVICE_NAME).await.unwrap()
-        else {
-            panic!("Provider should be available");
-        };
+        let provider = match_unwrap!(
+            service_adapter.get_message_provider(SERVICE_NAME).await.unwrap(),
+            GetMessageProviderOutcome::Success(provider) => provider
+        );
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
         let err = provider.get_latest_message(None).await.err().unwrap();
 
@@ -665,9 +663,7 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let outcome = service_adapter.get_message_provider(SERVICE_NAME).await;
-        let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
-            panic!("Unexpected outcome: {outcome:?}");
-        };
+        let message_provider = match_unwrap!(outcome, Ok(GetMessageProviderOutcome::Success(message_provider)) => message_provider);
 
         let latest_message = message_provider
             .get_latest_message(None)
@@ -1274,15 +1270,17 @@ pub(super) mod tests {
 
         // Wait for error status to be delivered
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
+        assert_matches!(
+            &status,
+            TelemetryServiceStatus {
                 id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR,
                 message,
                 details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails { serviceName } ),
             }
-            if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
-            "Unexpected status: {status:?}"
+            if message.contains("Service runtime error for service")
+                && message.contains(ERROR_MESSAGE)
+                && serviceName == SERVICE_NAME
         );
     }
 
@@ -1319,8 +1317,9 @@ pub(super) mod tests {
 
         // Wait for error status to be delivered
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
+        assert_matches!(
+            &status,
+            TelemetryServiceStatus {
                 id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR,
                 message,
@@ -1328,8 +1327,9 @@ pub(super) mod tests {
                     ServiceErrorDetails { serviceName }
                 ),
             }
-            if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
-            "Unexpected status: {status:?}"
+            if message.contains("Service runtime error for service")
+                && message.contains(ERROR_MESSAGE)
+                && serviceName == SERVICE_NAME
         );
     }
 }
@@ -1347,6 +1347,8 @@ mod tests_with_mockall {
     use sdv_telemetry_service_publisher_accessor::{
         MockServicePublisherAccessor, MockServicePublisherSubscription,
     };
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_test_utils::parameterized_test;
     use std::{sync::LazyLock, time::Duration};
@@ -1447,14 +1449,14 @@ mod tests_with_mockall {
                 .await
                 .unwrap();
 
-            assert!(matches!(
+            assert_matches!(
                 outcome,
                 Some(ServiceSubscription {
                     subscription_type: ServiceSubscriptionType::Configured {
                         accessor_subscription: _
                     }
                 })
-            ));
+            );
         }
     }
 
@@ -1521,7 +1523,7 @@ mod tests_with_mockall {
                 .await
                 .unwrap();
 
-            assert!(matches!(
+            assert_matches!(
                 outcome,
                 Some(ServiceSubscription {
                     subscription_type: ServiceSubscriptionType::Shared {
@@ -1529,7 +1531,7 @@ mod tests_with_mockall {
                         ..
                     }
                 })
-            ));
+            );
         }
     }
 
@@ -1605,19 +1607,16 @@ mod tests_with_mockall {
                 .unwrap()
                 .unwrap();
 
-            let ServiceSubscription {
-                subscription_type:
-                    ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. },
-            } = subscription
-            else {
-                panic!("Unexpected subscription");
-            };
+            let fetch_last_message_outcome = match_unwrap!(
+                subscription.subscription_type,
+                ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. } => fetch_last_message_outcome
+            );
 
-            assert!(if fetch_last_message {
-                matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled)
+            if fetch_last_message {
+                assert_matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled);
             } else {
-                matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Disabled)
-            });
+                assert_matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Disabled);
+            }
         }
     }
 
@@ -1671,15 +1670,12 @@ mod tests_with_mockall {
                 .unwrap()
                 .unwrap();
 
-            let ServiceSubscription {
-                subscription_type:
-                    ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. },
-            } = subscription
-            else {
-                panic!("Unexpected subscription");
-            };
+            let fetch_last_message_outcome = match_unwrap!(
+                subscription.subscription_type,
+                ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. } => fetch_last_message_outcome
+            );
 
-            assert!(matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled));
+            assert_matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled);
         }
     }
 
@@ -1739,15 +1735,12 @@ mod tests_with_mockall {
                 .unwrap()
                 .unwrap();
 
-            let ServiceSubscription {
-                subscription_type:
-                    ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. },
-            } = subscription
-            else {
-                panic!("Unexpected subscription");
-            };
+            let fetch_last_message_outcome = match_unwrap!(
+                subscription.subscription_type,
+                ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. } => fetch_last_message_outcome
+            );
 
-            assert!(matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled));
+            assert_matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled);
 
             let msg = rx.await.downcast_ref::<Int32Value>().unwrap().to_owned();
             assert_eq!(msg.value, 123);
@@ -1827,8 +1820,8 @@ mod tests_with_mockall {
                     .await
                     .unwrap()
                     .unwrap();
-                assert!(if expected_fetch_last_message {
-                    matches!(
+                if expected_fetch_last_message {
+                    assert_matches!(
                         subscription,
                         ServiceSubscription {
                             subscription_type: ServiceSubscriptionType::Shared {
@@ -1836,9 +1829,9 @@ mod tests_with_mockall {
                                 ..
                             },
                         }
-                    )
+                    );
                 } else {
-                    matches!(
+                    assert_matches!(
                         subscription,
                         ServiceSubscription {
                             subscription_type: ServiceSubscriptionType::Shared {
@@ -1846,8 +1839,8 @@ mod tests_with_mockall {
                                 ..
                             },
                         }
-                    )
-                });
+                    );
+                }
                 subscriptions.push(subscription);
 
                 // Publish a few messages after creating the first subscription, but before the second
@@ -2017,8 +2010,8 @@ mod tests_with_mockall {
                         .await
                         .unwrap()
                         .unwrap();
-                    assert!(if fetch_last_message {
-                        matches!(
+                    if fetch_last_message {
+                        assert_matches!(
                             subscription,
                             ServiceSubscription {
                                 subscription_type: ServiceSubscriptionType::Shared {
@@ -2026,9 +2019,9 @@ mod tests_with_mockall {
                                     ..
                                 },
                             }
-                        )
+                        );
                     } else {
-                        matches!(
+                        assert_matches!(
                             subscription,
                             ServiceSubscription {
                                 subscription_type: ServiceSubscriptionType::Shared {
@@ -2036,8 +2029,8 @@ mod tests_with_mockall {
                                     ..
                                 },
                             }
-                        )
-                    });
+                        );
+                    }
                     (fetch_last_message, message_rx)
                 }
             })

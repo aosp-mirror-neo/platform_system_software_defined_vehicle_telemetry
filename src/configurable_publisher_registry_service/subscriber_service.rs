@@ -71,6 +71,7 @@ mod tests {
 
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::{Message, MessageFull};
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::oneshot_callback;
 
     #[sdv_telemetry_test_utils::timeout]
@@ -91,10 +92,7 @@ mod tests {
             StatusCodes::SEND_DATA_DESERIALIZATION_FAILED.0,
             "Unexpected error: {err_binder:?}"
         );
-        assert!(
-            matches!(err_callback, ServicePublisherAccessorError::MessageParsingFailed(_)),
-            "Unexpected error: {err_callback:?}"
-        );
+        assert_matches!(err_callback, ServicePublisherAccessorError::MessageParsingFailed(_));
     }
 
     #[sdv_telemetry_test_utils::timeout]

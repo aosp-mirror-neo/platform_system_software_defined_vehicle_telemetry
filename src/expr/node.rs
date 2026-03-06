@@ -253,6 +253,8 @@ mod tests {
         Operator as OperatorProto, RelationalOperator,
     };
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use std::time::SystemTime;
 
     use crate::dynamic_message::DynamicMessage;
@@ -576,10 +578,7 @@ mod tests {
         let err = lt_node.evaluate(context).unwrap_sync().unwrap_err();
 
         // 0 cannot be less than True
-        assert!(
-            matches!(&err, NodeEvaluationError::ComparisonOperatorIncomptaibleOperands),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeEvaluationError::ComparisonOperatorIncomptaibleOperands);
     }
 
     #[test]
@@ -593,10 +592,7 @@ mod tests {
         let context = Arc::new(create_node_evaluation_context());
         let err = node.evaluate(context).unwrap_sync().unwrap_err();
 
-        assert!(
-            matches!(&err, NodeEvaluationError::MessageProviderError { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeEvaluationError::MessageProviderError { .. });
     }
 
     #[test]
@@ -630,7 +626,7 @@ mod tests {
         ));
 
         let res = node.evaluate(context).unwrap_sync().unwrap();
-        let NodeValue::Message(res_msg) = res else { panic!("Unexpected result: {res:?}") };
+        let res_msg = match_unwrap!(res, NodeValue::Message(res_msg) => res_msg);
         assert!(Arc::ptr_eq(&res_msg, &(msg as Arc<dyn DynamicMessage>)));
     }
 
@@ -656,7 +652,7 @@ mod tests {
         });
 
         let res = node3.evaluate(Arc::new(create_node_evaluation_context())).unwrap_sync().unwrap();
-        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {res:?}");
+        assert_matches!(&res, NodeValue::Bool(value) if *value);
     }
 
     #[tokio::test]
@@ -686,7 +682,7 @@ mod tests {
             .unwrap_async()
             .await
             .unwrap();
-        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {res:?}");
+        assert_matches!(&res, NodeValue::Bool(value) if *value);
     }
 
     #[test]
@@ -714,9 +710,10 @@ mod tests {
         .unwrap();
         let result = timestamp_node.evaluate(context).unwrap_sync();
 
-        let Ok(NodeValue::Int64(actual_timestamp)) = result else {
-            panic!("Unexpected result: {result:?}");
-        };
+        let actual_timestamp = match_unwrap!(
+            result,
+            Ok(NodeValue::Int64(actual_timestamp)) => actual_timestamp
+        );
         assert!((expected_timestamp - actual_timestamp).abs() < 100_000);
     }
 
@@ -770,9 +767,10 @@ mod tests {
         let context = Arc::new(create_node_evaluation_context());
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
-        assert!(
-            matches!(&err, NodeEvaluationError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeEvaluationError::MessageProviderError { e }
+            if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)
         );
     }
 
@@ -798,9 +796,10 @@ mod tests {
         let context = Arc::new(create_node_evaluation_context());
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
-        assert!(
-            matches!(&err, NodeEvaluationError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeEvaluationError::MessageProviderError { e }
+            if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)
         );
     }
 

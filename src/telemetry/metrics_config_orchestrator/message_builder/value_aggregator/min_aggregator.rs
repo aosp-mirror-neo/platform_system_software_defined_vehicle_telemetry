@@ -65,6 +65,8 @@ impl ValueAggregator for MinAggregator {
 mod tests {
     use super::*;
 
+    use sdv_telemetry_test_utils::assert_matches;
+
     fn get_computed_values_from_aggregator<T>(node_outputs: &[T]) -> Vec<NodeValue>
     where
         NodeValue: std::convert::From<T>,
@@ -110,10 +112,7 @@ mod tests {
         let mut aggregator = MinAggregator::new();
         let err = aggregator.compute(Some(NodeValue::Bool(true))).unwrap_err();
 
-        assert!(
-            matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. });
     }
 
     #[test]

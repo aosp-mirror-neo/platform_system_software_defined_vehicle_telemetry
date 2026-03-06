@@ -97,6 +97,7 @@ mod tests {
 
     use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
     use std::future;
 
     use crate::mock::MockDynamicMessage;
@@ -165,11 +166,7 @@ mod tests {
         });
         let err = result.unwrap_sync().unwrap_err();
 
-        assert!(
-            matches!(err.as_ref(), MessageProviderError::InvalidPublisherName),
-            "Unexpected error: {:?}",
-            err.as_ref()
-        );
+        assert_matches!(err.as_ref(), MessageProviderError::InvalidPublisherName);
         assert!(state.sync_message_cache.get(KNOWN_PUBLISHER_NAME).is_none());
     }
 
@@ -227,16 +224,8 @@ mod tests {
         let cached_err =
             state.async_message_cache.get(KNOWN_PUBLISHER_NAME).unwrap().clone().await.unwrap_err();
 
-        assert!(
-            matches!(err.as_ref(), MessageProviderError::InvalidPublisherName),
-            "Unexpected error: {:?}",
-            err.as_ref()
-        );
-        assert!(
-            matches!(cached_err.as_ref(), MessageProviderError::InvalidPublisherName),
-            "Unexpected error: {:?}",
-            cached_err.as_ref()
-        );
+        assert_matches!(err.as_ref(), MessageProviderError::InvalidPublisherName);
+        assert_matches!(cached_err.as_ref(), MessageProviderError::InvalidPublisherName);
     }
 
     #[test]

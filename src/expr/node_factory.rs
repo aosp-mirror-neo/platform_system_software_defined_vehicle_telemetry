@@ -462,6 +462,7 @@ mod tests {
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::parameterized_test;
 
     use crate::mock::*;
@@ -627,12 +628,9 @@ mod tests {
         let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
         );
     }
 
@@ -690,12 +688,9 @@ mod tests {
         let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert error because binary operator needs 2 children
-        assert!(
-            matches!(
-                &err,
-                NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
         );
     }
 
@@ -717,12 +712,9 @@ mod tests {
         let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError { index: 10, err: NodeEvaluationError::IndexOutOfBound { .. } }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 10, err: NodeEvaluationError::IndexOutOfBound { .. } }
         );
     }
 
@@ -745,15 +737,13 @@ mod tests {
         let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError {
-                    err: NodeEvaluationError::CyclicDependency { cycle },
-                    ..
-                }
-                if cycle == &vec![1, 0, 1]),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError {
+                err: NodeEvaluationError::CyclicDependency { cycle },
+                ..
+            }
+            if cycle == &vec![1, 0, 1]
         );
     }
 
@@ -767,10 +757,7 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(&err, NodeError { index: 0, err: NodeEvaluationError::NodeTypeNotSet }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeError { index: 0, err: NodeEvaluationError::NodeTypeNotSet });
     }
 
     #[test]
@@ -785,10 +772,7 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(&err, NodeError { err: NodeEvaluationError::ConstantValueNotSet, .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeError { err: NodeEvaluationError::ConstantValueNotSet, .. });
     }
 
     #[test]
@@ -803,10 +787,7 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. });
     }
 
     #[test]
@@ -834,16 +815,15 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err, NodeError {
-                    err: NodeEvaluationError::DeprecatedOperator {
-                        op: OperatorProto::RelationalOperator(r_op)
-                    },
-                    index: 0,
-                }
-                if r_op.enum_value().unwrap() == RelationalOperator::ALL_EQ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError {
+                err: NodeEvaluationError::DeprecatedOperator {
+                    op: OperatorProto::RelationalOperator(r_op)
+                },
+                index: 0,
+            }
+            if r_op.enum_value().unwrap() == RelationalOperator::ALL_EQ
         );
     }
 
@@ -881,14 +861,10 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError {
-                    err: NodeEvaluationError::CyclicDependency{cycle}, ..
-                }
-                if cycle == &vec![0, 0]),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { err: NodeEvaluationError::CyclicDependency{cycle}, .. }
+            if cycle == &vec![0, 0]
         );
     }
 
@@ -911,14 +887,10 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError {
-                    err: NodeEvaluationError::CyclicDependency{cycle}, ..
-                }
-                if cycle == &vec![1, 0, 1]),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { err: NodeEvaluationError::CyclicDependency{cycle}, .. }
+            if cycle == &vec![1, 0, 1]
         );
     }
 
@@ -938,12 +910,9 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError { index: 42, err: NodeEvaluationError::IndexOutOfBound { .. } }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 42, err: NodeEvaluationError::IndexOutOfBound { .. } }
         );
     }
 
@@ -959,10 +928,7 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. });
     }
 
     #[test]
@@ -980,10 +946,7 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(&err, NodeError { index: 0, err: NodeEvaluationError::LeftChildNotSet }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, NodeError { index: 0, err: NodeEvaluationError::LeftChildNotSet });
     }
 
     #[test]
@@ -1007,12 +970,9 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
         );
     }
 
@@ -1027,12 +987,9 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(
-            matches!(
-                &err,
-                NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
         );
     }
 
@@ -1118,15 +1075,12 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError {
-                    index: 1,
-                    err: NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
-                }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError {
+                index: 1,
+                err: NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
+            }
         );
     }
 
@@ -1139,12 +1093,9 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
         );
     }
 
@@ -1157,12 +1108,9 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
         );
     }
 
@@ -1198,15 +1146,9 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError {
-                    index: 1,
-                    err: NodeEvaluationError::LogicalOperatorIncompatibleOperands
-                }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 1, err: NodeEvaluationError::LogicalOperatorIncompatibleOperands }
         );
     }
 
@@ -1231,15 +1173,9 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError {
-                    index: 1,
-                    err: NodeEvaluationError::RoundingOperatorIncompatibleOperands
-                }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 1, err: NodeEvaluationError::RoundingOperatorIncompatibleOperands }
         );
     }
 
@@ -1265,12 +1201,9 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError { index: 1, err: NodeEvaluationError::UnaryOperatorIncorrectChildren }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 1, err: NodeEvaluationError::UnaryOperatorIncorrectChildren }
         );
     }
 
@@ -1343,12 +1276,9 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
-        assert!(
-            matches!(
-                &err,
-                NodeError { index: 0, err: NodeEvaluationError::DescriptorProviderError { .. } }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            NodeError { index: 0, err: NodeEvaluationError::DescriptorProviderError { .. } }
         );
     }
 
@@ -1532,19 +1462,16 @@ mod tests {
 
         let result = node_factory.validate(&[node], &context);
 
-        assert!(
-            matches!(
-                result,
-                Err(NodeError {
-                    index: 0,
-                    err: NodeEvaluationError::FunctionLeafNodeArgumentError {
-                        error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
-                            FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet,
-                        ),
-                    }
-                })
-            ),
-            "Unexpected result: {result:?}"
+        assert_matches!(
+            result,
+            Err(NodeError {
+                index: 0,
+                err: NodeEvaluationError::FunctionLeafNodeArgumentError {
+                    error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                        FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet,
+                    ),
+                }
+            })
         );
     }
 
@@ -1559,19 +1486,16 @@ mod tests {
 
         let result = node_factory.validate(&[node], &context);
 
-        assert!(
-            matches!(
-                result,
-                Err(NodeError {
-                    index: 0,
-                    err: NodeEvaluationError::FunctionLeafNodeArgumentError {
-                        error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
-                            FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSupported,
-                        ),
-                    }
-                })
-            ),
-            "Unexpected result: {result:?}"
+        assert_matches!(
+            result,
+            Err(NodeError {
+                index: 0,
+                err: NodeEvaluationError::FunctionLeafNodeArgumentError {
+                    error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                        FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSupported,
+                    ),
+                }
+            })
         );
     }
 

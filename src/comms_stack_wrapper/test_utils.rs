@@ -33,6 +33,7 @@ use sdv_comms::ContextRef;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvResult;
 use sdv_telemetry_comms_utils::ServiceName;
+use sdv_telemetry_test_utils::match_unwrap;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
 use std::io::{BufRead, BufReader, Lines, Write};
 use std::process::{Child, ChildStdout};
@@ -139,11 +140,10 @@ fn create_registration_args(
     service_name: &str,
     publisher_metadata: Option<MessageMetadata>,
 ) -> UnitRegistrationArgs {
-    let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
-        ServiceName::parse(service_name).unwrap()
-    else {
-        unreachable!();
-    };
+    let (unit_type, unit_name) = match_unwrap!(
+        ServiceName::parse(service_name).unwrap(),
+        ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } => (unit_type, unit_name)
+    );
 
     let mut unit_registration_args = UnitRegistrationArgs::new();
     unit_registration_args.set_unit_type(&unit_type);
@@ -217,11 +217,10 @@ pub(super) fn create_publisher_in_new_process(
     use std::process::Stdio;
     use std::str::FromStr;
 
-    let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
-        ServiceName::parse(&service_name).unwrap()
-    else {
-        panic!("Unsupported service name: '{service_name}'");
-    };
+    let (unit_type, unit_name) = match_unwrap!(
+        ServiceName::parse(&service_name).unwrap(),
+        ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } => (unit_type, unit_name)
+    );
     let unit_type = unit_type.to_string();
 
     let mut args = vec![
@@ -280,10 +279,10 @@ pub(super) async fn create_metadata_generation(
 ) -> (TestPublisherProxy, MetadataGeneration) {
     let ctx = make_context().await;
 
-    let ServiceName::UnitTypeBased { unit_type, .. } = ServiceName::parse(&service_name).unwrap()
-    else {
-        panic!("Failed to parse service name '{service_name}' as unit-type based service name.");
-    };
+    let unit_type = match_unwrap!(
+        ServiceName::parse(&service_name).unwrap(),
+        ServiceName::UnitTypeBased { unit_type, .. } => unit_type
+    );
 
     let publisher =
         create_publisher_in_new_process(service_name.to_owned(), PublisherType::DataTunnel);

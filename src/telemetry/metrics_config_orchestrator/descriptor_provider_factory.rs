@@ -106,15 +106,16 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::reflect::MessageDescriptor;
     use protobuf::MessageFull;
+    use sdv_telemetry_expr::node_error::DescriptorProviderError;
     use sdv_telemetry_proto_rust::metrics_configuration::{
         source::Source_type as SourceTypeProto, Aggregator, ProtoMessageBuilder,
         Source as SourceProto,
     };
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
+    use sdv_telemetry_test_utils::assert_matches;
 
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
-    use sdv_telemetry_expr::node_error::DescriptorProviderError;
 
     const PUBLISHER_1: &str = "pub_1";
     const PUBLISHER_2: &str = "pub_2";
@@ -175,10 +176,7 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, DescriptorProviderFactoryError::ServicePublisherManagerError { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, DescriptorProviderFactoryError::ServicePublisherManagerError { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -197,9 +195,9 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, DescriptorProviderFactoryError::InvalidAggregationPublisher { pub_name } if pub_name == PUBLISHER_1),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            DescriptorProviderFactoryError::InvalidAggregationPublisher { pub_name } if pub_name == PUBLISHER_1
         );
     }
 
@@ -214,10 +212,7 @@ mod tests {
 
         let err = descriptor_provider.get_descriptor(PUBLISHER_3).unwrap_err();
 
-        assert!(
-            matches!(&err, DescriptorProviderError::InvalidPublisherName),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(&err, DescriptorProviderError::InvalidPublisherName);
     }
 
     #[sdv_telemetry_test_utils::timeout]

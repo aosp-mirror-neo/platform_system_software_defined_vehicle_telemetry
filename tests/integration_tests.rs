@@ -48,6 +48,8 @@ use sdv_telemetry_sample_middleware_proto::tire::{
 };
 use sdv_telemetry_test_proto::test_message;
 use sdv_telemetry_test_proto::test_message::TestMessage;
+use sdv_telemetry_test_utils::assert_matches;
+use sdv_telemetry_test_utils::match_unwrap;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::pin::Pin;
@@ -581,14 +583,13 @@ async fn telemetry_service_status_reporting_test() {
     info!("Awaiting error status");
     let status = status_receiver.recv().await.unwrap();
 
-    assert!(
-        matches!(
-            &status.details,
-            Some(StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
-                metrics_config_uuid, trigger_name,
-            }))
-            if metrics_config_uuid == &config.uuid && trigger_name == &config.triggers[2].name),
-        "Unexpected status: {status:?}",
+    assert_matches!(
+        &status.details,
+        Some(StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
+            metrics_config_uuid,
+            trigger_name,
+        }))
+        if metrics_config_uuid == &config.uuid && trigger_name == &config.triggers[2].name
     );
 
     info!("Removing metrics config");
@@ -821,10 +822,7 @@ fn get_int_field_value(message: &dyn MessageDyn, name: &str) -> i32 {
     let field_descriptor = message.descriptor_dyn().field_by_name(name).unwrap();
     field_descriptor
         .get_singular(message)
-        .map(|value| match value {
-            ReflectValueRef::I32(value) => value,
-            value => panic!("Unexpected value: {value:?}"),
-        })
+        .map(|value| match_unwrap!(value, ReflectValueRef::I32(value) => value))
         .unwrap()
 }
 
@@ -833,10 +831,7 @@ fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> 
     field_descriptor
         .get_repeated(message)
         .into_iter()
-        .map(|value| match value {
-            ReflectValueRef::I32(value) => value,
-            value => panic!("Unexpected value: {value:?}"),
-        })
+        .map(|value| match_unwrap!(value, ReflectValueRef::I32(value) => value))
         .collect()
 }
 

@@ -828,9 +828,11 @@ mod tests {
             status_code: StatusCodes,
             status_message: &str,
         ) {
-            let Some(status_sender) = self.status_senders.lock().remove(&api_call_id) else {
-                panic!("Received unexpected API call id: {api_call_id}");
-            };
+            let status_sender = self
+                .status_senders
+                .lock()
+                .remove(&api_call_id)
+                .unwrap_or_else(|| panic!("Received unexpected API call id {api_call_id}"));
             status_sender.send((status_code, status_message.to_owned())).unwrap();
         }
 
