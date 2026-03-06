@@ -197,6 +197,10 @@ impl Publisher for ServicePublisher {
         .into()
     }
 
+    fn as_aggregation_publisher(&self) -> Option<&super::aggregation::AggregationPublisher> {
+        None
+    }
+
     async fn activate(self: Arc<Self>) {
         // Lock state mutex and hold it until the state transition is complete.
         let state_lock = self.state.lock().await;

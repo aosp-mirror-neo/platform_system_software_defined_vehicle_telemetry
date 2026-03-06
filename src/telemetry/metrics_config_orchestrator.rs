@@ -197,6 +197,7 @@ pub(super) struct MetricsConfig {
     start_trigger: Option<Arc<dyn Trigger>>,
     end_trigger: Option<Arc<dyn Trigger>>,
     finish_trigger: Option<Arc<dyn Trigger>>,
+    retain_aggregations_on_stop: bool,
 }
 
 impl DumpStateReporter for MetricsConfig {
@@ -425,6 +426,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             start_trigger: start_trigger.cloned(),
             end_trigger: end_trigger.cloned(),
             finish_trigger: finish_trigger.cloned(),
+            retain_aggregations_on_stop: config_proto.retain_aggregations_on_stop,
         });
         self.dump_manager.add_reporter("MetricsConfig", &config);
 
@@ -1094,6 +1096,14 @@ impl MetricsConfigOrchestratorImpl {
                 .await;
 
             Self::end_data_collection(&config, ReportReason::INCOMPLETE_STOPPED).await;
+
+            if !config.retain_aggregations_on_stop {
+                config
+                    .publishers
+                    .values()
+                    .filter_map(|p| p.as_aggregation_publisher())
+                    .for_each(|aggregation_publisher| aggregation_publisher.reset());
+            }
 
             // Subscribe to start trigger.
             Self::subscribe_to_start_trigger(

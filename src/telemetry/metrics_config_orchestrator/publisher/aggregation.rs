@@ -98,6 +98,10 @@ impl Publisher for AggregationPublisher {
         Ok(latest_message).into()
     }
 
+    fn as_aggregation_publisher(&self) -> Option<&AggregationPublisher> {
+        Some(self)
+    }
+
     async fn activate(self: Arc<Self>) {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
@@ -301,6 +305,10 @@ impl AggregationPublisher {
             trigger_subscriber: TriggerSubscriber::AggregationPublisher { name },
             triggers,
         }
+    }
+
+    pub fn reset(&self) {
+        self.message_builder.reset();
     }
 
     fn report_error<T: ErrorStatusCodes + Display>(
