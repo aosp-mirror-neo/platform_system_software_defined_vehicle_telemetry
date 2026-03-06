@@ -243,15 +243,18 @@ def stream_and_parse_command(
     # Set the initial size of the PTY.
     _sigwinch_handler()
 
-    with signal_handler(
-        signal.SIGWINCH, lambda _signum, _frame: _sigwinch_handler()
-    ), subprocess.Popen(
-        command,
-        stdin=pty_child,
-        stdout=pty_child,
-        stderr=pty_child,
-        env=env,
-    ) as process:
+    with (
+        signal_handler(
+            signal.SIGWINCH, lambda _signum, _frame: _sigwinch_handler()
+        ),
+        subprocess.Popen(
+            command,
+            stdin=pty_child,
+            stdout=pty_child,
+            stderr=pty_child,
+            env=env,
+        ) as process,
+    ):
         os.close(pty_child)
 
         def _parse_and_update_match(line: str):
@@ -447,12 +450,18 @@ def get_device_count_for_test(
     """Parses the test's XML config to determine the required device count."""
     config_path = sdv_catbox_config_dir / f"{test_name}.xml"
     if not config_path.exists():
-        raise Exception(f"Unable to determine device count for test '{test_name}': config path {config_path} does not exist.")
+        raise Exception(
+            f"Unable to determine device count for test '{test_name}': config"
+            f" path {config_path} does not exist."
+        )
 
     tree = ET.parse(config_path)
     template = tree.find(".//template-include[@name='device-config']")
     if template is None:
-        raise Exception(f"Unable to determine device count for test '{test_name}': unexpected XML structure.")
+        raise Exception(
+            f"Unable to determine device count for test '{test_name}':"
+            " unexpected XML structure."
+        )
 
     device_config = template.get("default", "")
     if "one-device" in device_config:
@@ -462,11 +471,13 @@ def get_device_count_for_test(
     if "three-devices" in device_config:
         return 3
 
-    raise Exception(f"Unable to determine device count for test '{test_name}': unsupported device config '{device_config}'.")
+    raise Exception(
+        f"Unable to determine device count for test '{test_name}': unsupported"
+        f" device config '{device_config}'."
+    )
 
-def get_atest_name_for_test(
-    test_name: str, sdv_catbox_config_dir: Path
-) -> str:
+
+def get_atest_name_for_test(test_name: str, sdv_catbox_config_dir: Path) -> str:
     """Parses the test's XML config to determine test's atest name."""
     config_path = sdv_catbox_config_dir / f"{test_name}.xml"
     if config_path.exists():
@@ -479,10 +490,7 @@ def get_atest_name_for_test(
             if atest_name:
                 return atest_name
 
-    raise Exception(
-        "Unable to determine atest name for test:"
-        f" {test_name}"
-    )
+    raise Exception(f"Unable to determine atest name for test: {test_name}")
 
 
 def run_all_tests(
