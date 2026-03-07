@@ -2152,4 +2152,94 @@ mod integration_tests {
              }
         ),
     );
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn create_rpc_subscription_does_not_block_on_first_message() {
+        let ctx = test_utils::make_context().await;
+        let service_name = test_utils::make_unique_service_name();
+        let _server = test_utils::register_server(
+            ctx,
+            &service_name,
+            Some(MESSAGE_METADATA_INT32.clone()),
+            HashMap::from([(
+                "CreateSubscription".to_owned(),
+                rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
+                    future::ready(Ok(stream::pending().boxed())).boxed()
+                })),
+            )]),
+        )
+        .await
+        .unwrap();
+
+        let accessor = create_accessor(ctx);
+        let outcome = accessor
+            .create_subscription(
+                &service_name,
+                None,
+                false,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_cancellation_handler(),
+            )
+            .await
+            .unwrap();
+
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
+            panic!("Unexpected outcome");
+        };
+
+        subscription.unsubscribe().await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn create_rpc_subscription_runs_cancellation_callback_on_error() {
+        let ctx = test_utils::make_context().await;
+        let service_name = test_utils::make_unique_service_name();
+        let _server = test_utils::register_server(
+            ctx,
+            &service_name,
+            Some(MESSAGE_METADATA_INT32.clone()),
+            HashMap::from([(
+                "CreateSubscription".to_owned(),
+                rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
+                    future::ready(Err(SdvStatus::new(SdvStatusCode::Internal))).boxed()
+                })),
+            )]),
+        )
+        .await
+        .unwrap();
+
+        let accessor = create_accessor(ctx);
+        let (tx, rx) = oneshot_callback();
+        let outcome = accessor
+            .create_subscription(
+                &service_name,
+                None,
+                false,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                Box::new(move || tx(())),
+            )
+            .await
+            .unwrap();
+
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
+            panic!("Unexpected outcome");
+        };
+
+        // Wait for cancellation callback to be called.
+        rx.await;
+
+        subscription.unsubscribe().await;
+    }
 }
