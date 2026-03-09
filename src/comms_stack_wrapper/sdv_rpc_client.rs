@@ -14,6 +14,7 @@
 
 //! Telemetry subscription logic for SDV RPC.
 
+use crate::unit_identifier_to_string;
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -25,7 +26,10 @@ use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
+use sdv_config_provider::vsidl_provider_api::RpcMethodDescriptor;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProvider;
+use sdv_status_rs::SdvResult;
+use sdv_status_rs::SdvStatus;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
     CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
@@ -35,14 +39,19 @@ use sdv_telemetry_service_publisher_accessor::{
 use std::time::Duration;
 use std::time::SystemTime;
 use tokio::select;
+use tokio::time::timeout;
 use tokio_util::sync::{CancellationToken, DropGuard};
-
-use crate::unit_identifier_to_string;
 
 const CREATE_SUBSCRIPTION_METHOD: &str = "CreateSubscription";
 const GET_LATEST_MESSAGE_METHOD: &str = "GetLatestMessage";
 const PROTO_ANY_FULL_NAME: &str = "google.protobuf.Any";
 const RPC_UNARY_CALL_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[cfg(not(test))]
+const RPC_CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// For tests, use a shorter timeout to fail faster.
+#[cfg(test)]
+const RPC_CLIENT_TIMEOUT: Duration = Duration::from_secs(1);
 
 struct SdvRpcSubscription {
     _subscription_drop_guard: DropGuard,
@@ -241,13 +250,12 @@ async fn get_req_res_descriptors_for_method(
     service_unit_definition: &ServiceUnitDefinition,
     method_name: &str,
 ) -> anyhow::Result<Option<(MessageDescriptor, MessageDescriptor)>> {
-    let Ok(rpc_descriptor) = vsidl_provider
-        .get_rpc_method_descriptor(
-            service_unit_definition.get_service_bundle_identity().get_fqin(),
-            &service_unit_definition.get_unit_type(),
-            method_name,
-        )
-        .await
+    let Ok(rpc_descriptor) = get_rpc_method_descriptor_with_timeout(
+        vsidl_provider,
+        service_unit_definition,
+        method_name,
+    )
+    .await
     else {
         return Ok(None);
     };
@@ -260,6 +268,27 @@ async fn get_req_res_descriptors_for_method(
     };
 
     Ok(Some((request_message, response_message)))
+}
+
+async fn get_rpc_method_descriptor_with_timeout(
+    vsidl_provider: &dyn VsidlConfigProvider,
+    service_unit_definition: &ServiceUnitDefinition,
+    method_name: &str,
+) -> SdvResult<RpcMethodDescriptor> {
+    let service_bundle_identity = service_unit_definition.get_service_bundle_identity();
+    let fqin = service_bundle_identity.get_fqin();
+    let unit_type = service_unit_definition.get_unit_type();
+    let future = vsidl_provider.get_rpc_method_descriptor(fqin, &unit_type, method_name);
+
+    timeout(RPC_CLIENT_TIMEOUT, future).await.map_err(|_| {
+        SdvStatus::with_message(
+            SdvStatusCode::DeadlineExceeded,
+            format!(
+                "Timed out getting RPC method descriptor for {fqin}|{unit_type} after {} seconds",
+                RPC_CLIENT_TIMEOUT.as_secs()
+            ),
+        )
+    })?
 }
 
 fn serialize_configuration(
