@@ -18,7 +18,7 @@ expression_nodes { field_leaf_node { source_name: "someip_source" field_names: "
 
 sources {
   name: "someip_source"
-  data_source { source_identifier: "com.sdv.someip.SomeIpBroker#SecondPart" }
+  data_source { source_identifier: "com.android.sdv.someip.SomeIpBroker#SecondPart" }
 }
 
 triggers {
