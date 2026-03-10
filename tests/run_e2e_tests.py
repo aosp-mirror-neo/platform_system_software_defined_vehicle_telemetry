@@ -142,14 +142,11 @@ def setup_devices(device_count: int, is_ivi: bool) -> List[str]:
 
     adb_serials: List[str] = list()
     for i in range(1, device_count + 1):
-        config = f"sdv_ivi_instance{i}" if is_ivi else f"sdv_core_instance{i}"
         result = run_command(
             [
-                "cvd",
+                "sdv-cf",
                 "create",
-                # Required to avoid interactive mode.
-                "-report_anonymous_usage_stats=n",
-                f"--config={config}",
+                f"--instance_name=instance{i}",
             ],
             capture_output=True,
         )
@@ -502,9 +499,11 @@ def run_all_tests(
     is_ivi: bool,
 ) -> None:
     """Categorizes and runs all specified tests."""
-    # Build necessary components
+    # Build necessary targets
+    targets = ["sdv-cf"]
     if test_runner == TestRunner.CATBOX:
-        run_command(["m", "catbox"])
+        targets.append("catbox")
+    run_command(["m", *targets])
 
     all_results = TestResults()
 
