@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Year;
 import java.time.ZoneId;
+import java.util.stream.Stream;
 
 import javax.lang.model.element.Modifier;
 
@@ -43,12 +44,6 @@ public final class ProtoDescriptorGenerator {
                 required = true,
                 description = "Path to the input .proto file.")
         private String protoFile;
-
-        @Parameter(
-                names = "--protoc_tool",
-                required = true,
-                description = "Path to the protoc executable.")
-        private String protocTool;
 
         @Parameter(
                 names = "--output_file",
@@ -79,8 +74,19 @@ public final class ProtoDescriptorGenerator {
         Args jcArgs = new Args();
         JCommander.newBuilder().addObject(jcArgs).build().parse(args);
 
+        // When run in a genrule, we need to access `aprotoc` from `./tools/out/bin`. When run in a
+        // test, we need to access `aprotoc` from `.` When run outside of a genrule, we need to
+        // access `aprotoc` from path. Since there is no good way to detect whether we are running
+        // as part of a genrule or a test, use existence of the `aprotoc` binary in
+        // `./tools/out/bin` and `.` as an indicator.
+        Path aprotocPath =
+                Stream.of("./tools/out/bin/aprotoc", "./aprotoc")
+                        .map(Path::of)
+                        .filter(Files::exists)
+                        .findFirst()
+                        .orElseGet(() -> Path.of("aprotoc"));
+
         Path protoFile = Paths.get(jcArgs.protoFile);
-        Path protocTool = Paths.get(jcArgs.protocTool);
         Path outputFile = Paths.get(jcArgs.outputFile);
         String outputPackage = jcArgs.outputPackage;
         String outputClass = jcArgs.outputClass;
@@ -88,7 +94,7 @@ public final class ProtoDescriptorGenerator {
 
         ProcessBuilder pb =
                 new ProcessBuilder(
-                        protocTool.toString(),
+                        aprotocPath.toString(),
                         "--descriptor_set_out=/dev/stdout",
                         "--proto_path=" + protoFile.getParent(),
                         protoFile.toString());
@@ -102,19 +108,18 @@ public final class ProtoDescriptorGenerator {
         }
 
         int exitCode = process.waitFor();
-
         if (exitCode != 0) {
-            throw new RuntimeException("protoc tool execution failed with exit code: " + exitCode);
+            String error =
+                    new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            throw new RuntimeException(
+                    "protoc execution failed (exit code: " + exitCode + ").\n" + error);
         }
 
         // It's possible for protoc to succeed but produce no output.
         if (descriptorBytes.length == 0) {
             String error =
                     new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-            throw new IOException(
-                    "protoc executed successfully but produced no output to stdout. "
-                            + "Stderr contents:\n"
-                            + error);
+            throw new IOException("protoc execution succeeded but produced no output.\n" + error);
         }
 
         FileDescriptorSet descriptorSet = FileDescriptorSet.parseFrom(descriptorBytes);

@@ -15,15 +15,11 @@
 // Generates the Java source file from the test proto
 gensrcs {
     name: "sdv_telemetry_descriptor_generator_test_output",
-    tools: [
-        "sdv_telemetry_descriptor_generator",
-        "aprotoc",
-    ],
+    tools: ["sdv_telemetry_descriptor_generator"],
     srcs: ["reference_files/TestMessageSchema.proto"],
     output_extension: "java",
     cmd: "$(location sdv_telemetry_descriptor_generator) " +
         "--proto_file $(location reference_files/TestMessageSchema.proto) " +
-        "--protoc_tool $(location aprotoc) " +
         "--output_file $(out) " +
         "--output_package com.google.android.sdv.telemetry.schemas " +
         "--output_class TestMessageSchema " +
@@ -42,6 +38,11 @@ java_test_host {
         "libprotobuf-java-full",
         "truth",
         "sdv_telemetry_descriptor_generator",
+    ],
+    data_native_bins: [
+        // keep-sorted start
+        "aprotoc",
+        // keep-sorted end
     ],
     test_options: {
         unit_test: true,

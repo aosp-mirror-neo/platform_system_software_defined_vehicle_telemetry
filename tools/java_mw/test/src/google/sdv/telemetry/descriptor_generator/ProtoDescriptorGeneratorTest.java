@@ -16,7 +16,7 @@ package google.sdv.telemetry.descriptor_generator;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.junit.Assert.fail;
+import static org.junit.Assert.assertThrows;
 
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto;
 import com.google.protobuf.DescriptorProtos.FileDescriptorSet;
@@ -63,23 +63,20 @@ public final class ProtoDescriptorGeneratorTest {
 
     @Test
     public void testGeneration_fromProtoWithSyntaxError_failsWithProtocError() throws Exception {
-        String protocToolPath = "/usr/bin/protoc";
-        String invalidProtoPath = "InvalidMessageSchema.proto";
-
         String[] args = {
-            "--proto_file", invalidProtoPath,
-            "--protoc_tool", protocToolPath,
+            "--proto_file", "./reference_files/InvalidMessageSchema.proto",
             "--output_file", "InvalidMessageSchema.java",
             "--output_class", "InvalidMessageSchema",
             "--output_package", "com.google.android.sdv.telemetry.schemas",
             "--root_message_name", "com.google.sdv.telemetry.test.InvalidMessage"
         };
 
-        try {
-            ProtoDescriptorGenerator.main(args);
-            fail("Expected a RuntimeException to be thrown, but none was.");
-        } catch (RuntimeException e) {
-            assertThat(e.getMessage()).isEqualTo("protoc tool execution failed with exit code: 1");
-        }
+        var thrown =
+                assertThrows(RuntimeException.class, () -> ProtoDescriptorGenerator.main(args));
+        assertThat(thrown)
+                .hasMessageThat()
+                .isEqualTo(
+                        "protoc execution failed (exit code: 1).\n"
+                            + "reference_files/InvalidMessageSchema.proto:26:1: Expected \";\".\n");
     }
 }
