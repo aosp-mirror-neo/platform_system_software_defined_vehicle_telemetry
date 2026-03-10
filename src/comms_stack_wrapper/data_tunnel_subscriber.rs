@@ -25,7 +25,11 @@ use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
+use sdv_config_provider::vsidl_provider_api::PublicationDescriptor;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProvider;
+use sdv_status_rs::SdvResult;
+use sdv_status_rs::SdvStatus;
+use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
     CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
     GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
@@ -33,12 +37,20 @@ use sdv_telemetry_service_publisher_accessor::{
 };
 use std::iter::Iterator;
 use std::pin::pin;
+use std::time::Duration;
 use std::time::SystemTime;
 use tokio::select;
+use tokio::time::timeout;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_message_stream::create_message_stream;
 use crate::unit_identifier_to_string;
+
+#[cfg(not(test))]
+const GET_PUBLICATION_DESCRIPTOR_TIMEOUT: Duration = Duration::from_secs(10);
+/// For tests, use a shorter timeout to fail faster.
+#[cfg(test)]
+const GET_PUBLICATION_DESCRIPTOR_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Struct for subscription of DT topic.
 struct DataTunnelSubscription {
@@ -193,13 +205,29 @@ pub(super) async fn get_message_descriptor(
     vsidl_provider: &dyn VsidlConfigProvider,
     service_unit_definition: &ServiceUnitDefinition,
 ) -> anyhow::Result<Option<MessageDescriptor>> {
-    Ok(vsidl_provider
-        .get_publication_descriptor(
-            service_unit_definition.get_service_bundle_identity().get_fqin(),
-            &service_unit_definition.get_unit_type(),
-        )
+    Ok(get_publication_descriptor_with_timeout(vsidl_provider, service_unit_definition)
         .await
         .map(|publication_descriptor| Some(publication_descriptor.message_descriptor))?)
+}
+
+async fn get_publication_descriptor_with_timeout(
+    vsidl_provider: &dyn VsidlConfigProvider,
+    service_unit_definition: &ServiceUnitDefinition,
+) -> SdvResult<PublicationDescriptor> {
+    let service_bundle_identity = service_unit_definition.get_service_bundle_identity();
+    let fqin = service_bundle_identity.get_fqin();
+    let unit_type = service_unit_definition.get_unit_type();
+    let future = vsidl_provider.get_publication_descriptor(fqin, &unit_type);
+
+    timeout(GET_PUBLICATION_DESCRIPTOR_TIMEOUT, future).await.map_err(|_| {
+        SdvStatus::with_message(
+            SdvStatusCode::DeadlineExceeded,
+            format!(
+                "Timed out getting publication descriptor for {fqin}|{unit_type} after {} seconds",
+                GET_PUBLICATION_DESCRIPTOR_TIMEOUT.as_secs()
+            ),
+        )
+    })?
 }
 
 pub(crate) fn read_length_delimited_proto(
