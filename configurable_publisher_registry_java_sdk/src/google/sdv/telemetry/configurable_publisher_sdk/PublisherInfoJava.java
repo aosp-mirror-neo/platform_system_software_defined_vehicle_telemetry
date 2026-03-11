@@ -48,8 +48,11 @@ public class PublisherInfoJava {
      * @param messageTypeName The fully qualified name of the message type.
      * @param supportsGet True if the publisher supports the 'get' operation.
      */
-    public PublisherInfoJava(String serviceName, byte[] fileDescriptorSet, String messageTypeName,
-                             boolean supportsGet) {
+    public PublisherInfoJava(
+            String serviceName,
+            byte[] fileDescriptorSet,
+            String messageTypeName,
+            boolean supportsGet) {
         this.serviceName = serviceName;
         this.fileDescriptorSet = fileDescriptorSet;
         this.messageTypeName = messageTypeName;
