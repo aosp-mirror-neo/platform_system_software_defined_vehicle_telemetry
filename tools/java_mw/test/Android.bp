@@ -29,15 +29,19 @@ gensrcs {
 java_test_host {
     name: "sdv_mt_proto_descriptor_generator_test",
     srcs: [
-        "src/google/sdv/telemetry/descriptor_generator/ProtoDescriptorGeneratorTest.java",
+        // keep-sorted start
         ":sdv_telemetry_descriptor_generator_test_output",
+        "src/google/sdv/telemetry/descriptor_generator/ProtoDescriptorGeneratorTest.java",
+        // keep-sorted end
     ],
     data: ["reference_files/InvalidMessageSchema.proto"],
     static_libs: [
+        // keep-sorted start
         "junit",
         "libprotobuf-java-full",
-        "truth",
         "sdv_telemetry_descriptor_generator",
+        "truth",
+        // keep-sorted end
     ],
     data_native_bins: [
         // keep-sorted start
@@ -49,7 +53,10 @@ java_test_host {
     },
     auto_gen_config: true,
     test_suites: [
+        // keep-sorted start
         "automotive-sdv-tests",
         "general-tests",
+        "sdv-host-unit-tests",
+        // keep-sorted end
     ],
 }
