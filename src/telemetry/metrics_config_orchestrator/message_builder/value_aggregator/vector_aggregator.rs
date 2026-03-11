@@ -61,6 +61,7 @@ mod tests {
     use super::*;
 
     use sdv_telemetry_expr::dynamic_message::DynamicMessage;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::TEST_MESSAGE;
     use std::sync::Arc;
 
@@ -202,10 +203,7 @@ mod tests {
         let mut aggregator = VectorAggregator::new(None);
         let err = aggregator.compute(Some(NodeValue::BoolList(vec![true, false]))).unwrap_err();
 
-        assert!(
-            matches!(&err, AggregationError::VectorInitializationError { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, AggregationError::VectorInitializationError { .. });
     }
 
     #[test]

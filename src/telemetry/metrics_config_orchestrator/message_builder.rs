@@ -187,6 +187,7 @@ mod tests {
     use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::{msg_dyn_eq, TEST_MESSAGE};
     use std::sync::Arc;
     use value_aggregator::mock::MockValueAggregator;
@@ -513,14 +514,11 @@ mod tests {
 
         assert_eq!(errors.len(), 1);
         let err = &errors[0].error;
-        assert!(
-            matches!(
-                err,
-                MessageBuilderErrorType::ExpressionEvaluationError {
-                    e: NodeEvaluationError::DivideByZero,
-                }
-            ),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            err,
+            MessageBuilderErrorType::ExpressionEvaluationError {
+                e: NodeEvaluationError::DivideByZero,
+            }
         );
     }
 
@@ -545,10 +543,7 @@ mod tests {
         assert_eq!(errors.len(), 1);
 
         let err = &errors[0].error;
-        assert!(
-            matches!(err, MessageBuilderErrorType::BadAggregation { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, MessageBuilderErrorType::BadAggregation { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -583,10 +578,7 @@ mod tests {
         assert_eq!(errors.len(), 1);
 
         let err = &errors[0].error;
-        assert!(
-            matches!(err, MessageBuilderErrorType::ExpressionEvaluationError { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(err, MessageBuilderErrorType::ExpressionEvaluationError { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]

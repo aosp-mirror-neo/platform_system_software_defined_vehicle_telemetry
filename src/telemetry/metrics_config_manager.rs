@@ -615,6 +615,7 @@ mod tests {
     use rand::prelude::SliceRandom;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use std::fs::{create_dir, create_dir_all, File};
     use std::io::Write;
@@ -1166,10 +1167,7 @@ mod tests {
 
         assert!(res.is_ok());
         assert!(file_path.is_file());
-        assert!(
-            matches!(&err, MetricsConfigManagerError::DuplicateMetricsConfigUuid { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigManagerError::DuplicateMetricsConfigUuid { .. });
         assert_eq!(2, test_environment.get_num_validate_config_calls());
     }
 
@@ -1231,10 +1229,7 @@ mod tests {
 
         let err =
             test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
-        assert!(
-            matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. });
         assert_eq!(1, test_environment.get_num_validate_config_calls());
     }
 
@@ -1252,10 +1247,7 @@ mod tests {
 
         let err =
             test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
-        assert!(
-            matches!(&err, MetricsConfigManagerError::PersistentStorageLimitExceeded),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigManagerError::PersistentStorageLimitExceeded);
         assert_eq!(0, test_environment.get_num_validate_config_calls());
     }
 
@@ -1343,10 +1335,7 @@ mod tests {
 
         let err =
             test_environment.manager.activate_metrics_config(&UUID.to_string()).await.unwrap_err();
-        assert!(
-            matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. });
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
     }
 
@@ -1439,10 +1428,7 @@ mod tests {
             .deactivate_metrics_config(&UUID.to_string())
             .await
             .unwrap_err();
-        assert!(
-            matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. }),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. });
 
         assert!(new_file_path.is_file());
         assert_eq!(1, test_environment.get_num_finish_config_calls());
@@ -1544,9 +1530,9 @@ mod tests {
         .await;
         let err =
             test_environment.manager.remove_metrics_config(&UUID.to_string()).await.unwrap_err();
-        assert!(
-            matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { uuid } if *uuid == UUID.to_string()),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsConfigManagerError::InvalidConfigUuid { uuid } if *uuid == UUID.to_string()
         );
     }
 

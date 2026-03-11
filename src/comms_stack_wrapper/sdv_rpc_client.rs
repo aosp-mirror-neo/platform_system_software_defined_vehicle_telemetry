@@ -53,6 +53,7 @@ const RPC_CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
 const RPC_CLIENT_TIMEOUT: Duration = Duration::from_secs(1);
 
+#[derive(Debug)]
 struct SdvRpcSubscription {
     _subscription_drop_guard: DropGuard,
 }

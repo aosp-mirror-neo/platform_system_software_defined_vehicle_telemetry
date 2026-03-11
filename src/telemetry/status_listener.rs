@@ -187,6 +187,7 @@ mod tests {
     };
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryApiStatusListener::BnTelemetryApiStatusListener;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryMiscStatusListener::BnTelemetryMiscStatusListener;
+    use sdv_telemetry_test_utils::assert_matches;
     use std::sync::Arc;
 
     #[derive(Clone)]
@@ -430,10 +431,7 @@ mod tests {
             .set_misc_status_listener(binder_misc_status_listener)
             .unwrap_err();
 
-        assert!(
-            matches!(&err, SetMiscStatusListenerError::ListenerAlreadySet),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, SetMiscStatusListenerError::ListenerAlreadySet);
     }
 
     #[test]

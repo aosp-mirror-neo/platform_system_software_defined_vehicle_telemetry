@@ -267,6 +267,7 @@ mod test {
     use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::mpsc;
@@ -385,7 +386,7 @@ mod test {
             // Less than 1 hour old.
             Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
         );
-        assert!(matches!(report.report_reason.unwrap(), ReportReason::INITIAL));
+        assert_matches!(report.report_reason.unwrap(), ReportReason::INITIAL);
         assert!(!Uuid::try_parse(&report.report_uuid).unwrap().is_nil());
 
         // as built by MockMessageBuilder
@@ -430,7 +431,7 @@ mod test {
             // Less than 1 hour old.
             Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
         );
-        assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
+        assert_matches!(report.report_reason.unwrap(), ReportReason::REGULAR);
         assert!(!Uuid::try_parse(&report.report_uuid).unwrap().is_nil());
 
         // as built by MockMessageBuilder
@@ -466,8 +467,9 @@ mod test {
 
         // Wait for error status to be delivered.
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
+        assert_matches!(
+            &status,
+            TelemetryServiceStatus {
                 id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR,
                 message,
@@ -475,8 +477,9 @@ mod test {
                     MetricsReportGeneratorErrorDetails { metricsConfigUUID, metricsReportName, fieldName }
                 ),
             }
-            if message.contains("failed due to message builder error") && *metricsConfigUUID == CONFIG_UUID.to_string() && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME),
-            "Unexpected status: {status:?}"
+            if message.contains("failed due to message builder error")
+                && *metricsConfigUUID == CONFIG_UUID.to_string()
+                && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME
         );
     }
 

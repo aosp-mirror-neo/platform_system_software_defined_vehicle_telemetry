@@ -445,6 +445,8 @@ mod integration_tests {
         test_bool_value_1::BoolValue as TestBoolValue1,
         test_bool_value_2::BoolValue as TestBoolValue2,
     };
+    use sdv_telemetry_test_utils::assert_matches;
+    use sdv_telemetry_test_utils::match_unwrap;
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
@@ -612,26 +614,17 @@ mod integration_tests {
 
     fn get_i64_field(message: Box<dyn MessageDyn>) -> i64 {
         let field_descriptor = message.descriptor_dyn().field_by_name("value").unwrap();
-        match field_descriptor.get_singular(&*message) {
-            Some(ReflectValueRef::I64(value)) => value,
-            result => panic!("Unexpected value: {result:?}"),
-        }
+        match_unwrap!(field_descriptor.get_singular(&*message), Some(ReflectValueRef::I64(value)) => value)
     }
 
     fn get_int_field_value(message: Box<dyn MessageDyn>) -> i32 {
         let int_field_descriptor = message.descriptor_dyn().field_by_name("int_field").unwrap();
-        match int_field_descriptor.get_singular(&*message) {
-            Some(ReflectValueRef::I32(value)) => value,
-            result => panic!("Unexpected value: {result:?}"),
-        }
+        match_unwrap!(int_field_descriptor.get_singular(&*message), Some(ReflectValueRef::I32(value)) => value)
     }
 
     fn get_bool_field_value(message: Box<dyn MessageDyn>, field_name: &str) -> bool {
         let field_descriptor = message.descriptor_dyn().field_by_name(field_name).unwrap();
-        match field_descriptor.get_singular_field_or_default(&*message) {
-            ReflectValueRef::Bool(value) => value,
-            result => panic!("Unexpected value: {result:?}"),
-        }
+        match_unwrap!(field_descriptor.get_singular_field_or_default(&*message), ReflectValueRef::Bool(value) => value)
     }
 
     fn write_message(publisher: &dt::Publisher, message: TestMessage) {
@@ -731,10 +724,7 @@ mod integration_tests {
 
         let outcome = accessor.get_message_provider(INVALID_SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -744,10 +734,7 @@ mod integration_tests {
 
         let outcome = accessor.get_message_provider(VALID_SERVICE_NAME).await;
 
-        assert!(
-            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
-            "Unexpected outcome: {outcome:?}"
-        );
+        assert_matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -846,7 +833,7 @@ mod integration_tests {
             .await
             .unwrap();
 
-        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
+        assert_matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -867,7 +854,7 @@ mod integration_tests {
             .await
             .unwrap();
 
-        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
+        assert_matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. });
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -917,19 +904,17 @@ mod integration_tests {
                 )
                 .await
                 .unwrap();
-            assert!(
-                if fetch_last_message {
-                    matches!(outcome, CreateSubscriptionOutcome::Subscribed {
-                        subscription: _,
-                        fetch_last_message_outcome: FetchLastMessageOutcome::Enabled,
-                    })
-                } else {
-                    matches!(outcome, CreateSubscriptionOutcome::Subscribed {
-                        subscription: _,
-                        fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
-                    })
-                }
-            );
+            if fetch_last_message {
+                assert_matches!(outcome, CreateSubscriptionOutcome::Subscribed {
+                    subscription: _,
+                    fetch_last_message_outcome: FetchLastMessageOutcome::Enabled,
+                });
+            } else {
+                assert_matches!(outcome, CreateSubscriptionOutcome::Subscribed {
+                    subscription: _,
+                    fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+                });
+            }
         },
 
         fetch_last_message_true: (true),
@@ -979,20 +964,20 @@ mod integration_tests {
             )
             .await
             .unwrap();
-        assert!(matches!(
+        assert_matches!(
             outcome1,
             CreateSubscriptionOutcome::Subscribed {
                 subscription: _,
                 fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
             }
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             outcome2,
             CreateSubscriptionOutcome::Subscribed {
                 subscription: _,
                 fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
             }
-        ));
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout(10_000)]
@@ -1048,20 +1033,20 @@ mod integration_tests {
         write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
         write_message(&publisher, TestMessage { int_field: 2, ..Default::default() });
 
-        assert!(matches!(
+        assert_matches!(
             outcome1,
             CreateSubscriptionOutcome::Subscribed {
                 subscription: _,
                 fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
             }
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             outcome2,
             CreateSubscriptionOutcome::Subscribed {
                 subscription: _,
                 fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
             }
-        ));
+        );
 
         assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap().0), 1);
         assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap().0), 2);
@@ -1105,13 +1090,13 @@ mod integration_tests {
             )
             .await
             .unwrap();
-        assert!(matches!(
+        assert_matches!(
             outcome,
             CreateSubscriptionOutcome::Subscribed {
                 subscription: _,
                 fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
             }
-        ));
+        );
 
         let message1_sent_at = Instant::now();
         write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
@@ -1126,10 +1111,7 @@ mod integration_tests {
         assert_eq!(get_int_field_value(message1), 1);
         // Message 2 should be silently discarded.
         assert_eq!(get_int_field_value(message3), 3);
-        assert!(
-            matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
-            "The channel should be empty."
-        );
+        assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
 
         {
             let elapsed = message1_received_at.duration_since(message1_sent_at);
@@ -1183,10 +1165,10 @@ mod integration_tests {
                 )
                 .await
                 .unwrap();
-            assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed {
+            assert_matches!(outcome, CreateSubscriptionOutcome::Subscribed {
                 subscription: _,
-                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled
-            }));
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+            });
 
             // Cause an overflow.
             for i in 1..=30 {
@@ -1195,12 +1177,8 @@ mod integration_tests {
 
             if sub_sampling_interval == SubSamplingInterval::ZERO {
                 let message = rx.recv().await.unwrap();
-                let Err(ServicePublisherAccessorError::MessageRetrievalFailed(error)) = message else {
-                    panic!("Unexpected message: {message:?}");
-                };
-                let Some(error) = error.root_cause().downcast_ref::<SdvStatus>() else {
-                    panic!("Unexpected error: {error:?}");
-                };
+                let error = match_unwrap!(message, Err(ServicePublisherAccessorError::MessageRetrievalFailed(error)) => error);
+                let error = match_unwrap!(error.root_cause().downcast_ref::<SdvStatus>(), Some(error) => error);
                 assert_eq!(error.status_code(), SdvStatusCode::DataLoss);
 
                 // After the overflow occurred, we should be able to read the last `n/2` (=3)
@@ -1431,19 +1409,16 @@ mod integration_tests {
             .unwrap();
         let received_msg = rx.await.unwrap().0;
 
-        let CreateSubscriptionOutcome::Subscribed {
-            subscription,
-            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
-        } = outcome
-        else {
-            panic!("Unexpected outcome");
-        };
+        let subscription = match_unwrap!(
+            outcome,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+            } => subscription
+        );
         let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();
         let value = value_field.get_singular(received_msg.as_ref()).unwrap();
-        assert!(
-            matches!(&value, ReflectValueRef::I32(val) if *val == msg.value),
-            "Unexpected value: {value:?}"
-        );
+        assert_matches!(&value, ReflectValueRef::I32(val) if *val == msg.value);
 
         // Unsubscribe to avoid error sent to `create_subscription` callback triggered by publisher
         // being dropped while still subscribed.
@@ -1458,10 +1433,10 @@ mod integration_tests {
         let service_name = test_utils::make_unique_service_name();
 
         let subscriber = create_accessor(ctx);
-        assert!(matches!(
+        assert_matches!(
             subscriber.get_message_provider(&service_name).await.unwrap(),
             GetMessageProviderOutcome::NotRegistered
-        ));
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1484,11 +1459,10 @@ mod integration_tests {
         .unwrap();
 
         let subscriber = create_accessor(ctx);
-        let GetMessageProviderOutcome::Success(provider) =
-            subscriber.get_message_provider(&service_name).await.unwrap()
-        else {
-            panic!("Unexpected outcome");
-        };
+        let provider = match_unwrap!(
+            subscriber.get_message_provider(&service_name).await.unwrap(),
+            GetMessageProviderOutcome::Success(provider) => provider
+        );
 
         let message1 = provider.get_latest_message(None).await;
 
@@ -1496,7 +1470,7 @@ mod integration_tests {
         let message2 = provider.get_latest_message(None).await;
         let message3 = provider.get_latest_message(None).await;
 
-        assert!(matches!(message1, Ok(None)));
+        assert_matches!(message1, Ok(None));
         assert_eq!(get_int_field_value(message2.unwrap().unwrap()), 2);
         assert_eq!(get_int_field_value(message3.unwrap().unwrap()), 2);
     }
@@ -1527,9 +1501,8 @@ mod integration_tests {
             .get_message_provider(&service_name)
             .await
             .expect("Message provider retrieval should be successful");
-        let GetMessageProviderOutcome::Success(provider) = outcome else {
-            panic!("Unexpected outcome: {outcome:?}");
-        };
+        let provider =
+            match_unwrap!(outcome, GetMessageProviderOutcome::Success(provider) => provider);
         let received_msg = provider
             .get_latest_message(None)
             .await
@@ -1538,10 +1511,7 @@ mod integration_tests {
 
         let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();
         let value = value_field.get_singular(received_msg.as_ref()).unwrap();
-        assert!(
-            matches!(&value, ReflectValueRef::I32(val) if *val == msg.value),
-            "Unexpected value: {value:?}"
-        );
+        assert_matches!(&value, ReflectValueRef::I32(val) if *val == msg.value);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1569,9 +1539,8 @@ mod integration_tests {
             .get_message_provider(&service_name)
             .await
             .expect("Message provider retrieval should be successful");
-        let GetMessageProviderOutcome::Success(provider) = outcome else {
-            panic!("Unexpected outcome: {outcome:?}");
-        };
+        let provider =
+            match_unwrap!(outcome, GetMessageProviderOutcome::Success(provider) => provider);
 
         let maybe_message = provider.get_latest_message(None).await;
 
@@ -1854,15 +1823,13 @@ mod integration_tests {
                 )
                 .await
                 .unwrap();
-            assert!(matches!(subscription_outcome, CreateSubscriptionOutcome::Subscribed {
+            assert_matches!(subscription_outcome, CreateSubscriptionOutcome::Subscribed {
                 subscription: _, fetch_last_message_outcome: _
-            }));
+            });
 
             let message_provider_outcome =
                 subscriber.get_message_provider(&service_name).await.unwrap();
-            let GetMessageProviderOutcome::Success(message_provider) = message_provider_outcome else {
-                panic!("Unexpected outcome: {message_provider_outcome:?}");
-            };
+            let message_provider = match_unwrap!(message_provider_outcome, GetMessageProviderOutcome::Success(message_provider) => message_provider);
 
             let message = BoolValue { value: false, ..Default::default() };
             // This test checks that a protobuf message that serializes to an empty byte array is
@@ -2013,7 +1980,7 @@ mod integration_tests {
             .await
             .unwrap();
 
-        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed { .. }));
+        assert_matches!(outcome, CreateSubscriptionOutcome::Subscribed { .. });
 
         // Drop the publisher to simulate the service stopping.
         drop(publisher);
@@ -2039,9 +2006,7 @@ mod integration_tests {
 
             let accessor = create_accessor_with_context();
             let outcome = accessor.get_message_provider(&service_name).await.unwrap();
-            let GetMessageProviderOutcome::Success(provider) = outcome else {
-                panic!("Unexpected outcome: {outcome:?}");
-            };
+            let provider = match_unwrap!(outcome, GetMessageProviderOutcome::Success(provider) => provider);
 
             publisher.publish(1);
             let msg = provider.get_latest_message(None).await.unwrap().unwrap();

@@ -61,6 +61,7 @@ mod tests {
     use lazy_static::lazy_static;
     use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
+    use sdv_telemetry_test_utils::assert_matches;
     use std::collections::HashMap;
 
     use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
@@ -130,10 +131,7 @@ mod tests {
         let message_provider = create_message_provider(create_metrics_config());
         let err = message_provider.get_message(PUBLISHER_NAME).unwrap_sync().err().unwrap();
 
-        assert!(
-            matches!(&err, MessageProviderError::InvalidPublisherName),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MessageProviderError::InvalidPublisherName);
     }
 
     #[test]

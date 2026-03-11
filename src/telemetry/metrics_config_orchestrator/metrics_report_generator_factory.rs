@@ -224,6 +224,7 @@ mod tests {
     use sdv_telemetry_proto_rust::metrics_configuration::{
         MetricsConfig as MetricsConfigProto, ProtoMessageBuilder,
     };
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
@@ -367,10 +368,7 @@ mod tests {
 
         let err = factory.create_using_empty_context(&config).err().unwrap();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet);
     }
 
     #[test]
@@ -380,10 +378,7 @@ mod tests {
 
         let err = factory.create_using_empty_context(&config).err().unwrap();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet);
     }
 
     #[test]
@@ -393,9 +388,9 @@ mod tests {
 
         let err = factory.create_using_empty_context(&config).err().unwrap();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME
         );
     }
 
@@ -431,9 +426,9 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }
         );
     }
 
@@ -475,10 +470,7 @@ mod tests {
 
         let err = factory.validate_using_empty_context(&config).unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet);
     }
 
     #[test]
@@ -488,10 +480,7 @@ mod tests {
 
         let err = factory.validate_using_empty_context(&config).unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet);
     }
 
     #[test]
@@ -501,10 +490,7 @@ mod tests {
 
         let err = factory.validate_using_empty_context(&config).unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME);
     }
 
     #[test]
@@ -525,9 +511,9 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }),
-            "Unexpected error: {err:?}"
+        assert_matches!(
+            &err,
+            MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }
         );
     }
 
@@ -537,10 +523,7 @@ mod tests {
         let config = create_config_with_empty_trigger_names(/*incomplete_report=*/ false);
         let err = factory.validate_using_empty_context(&config).unwrap_err();
 
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::TriggerNameRequired),
-            "Unexpected error: {err:?}"
-        );
+        assert_matches!(&err, MetricsReportGeneratorFactoryError::TriggerNameRequired);
     }
 
     #[test]

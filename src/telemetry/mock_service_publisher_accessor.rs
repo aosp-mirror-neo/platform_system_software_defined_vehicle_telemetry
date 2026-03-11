@@ -74,6 +74,7 @@ struct MockServicePublisherMessageProvider {
     data: Weak<Mutex<MockServicePublisherAccessorData>>,
 }
 
+#[derive(Debug)]
 struct MockServicePublisherSubscription {
     data: Weak<Mutex<MockServicePublisherAccessorData>>,
     service_name: String,

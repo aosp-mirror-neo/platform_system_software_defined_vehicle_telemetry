@@ -24,6 +24,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
 use sdv_status_rs::SdvStatus;
 use std::fmt;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -194,6 +195,20 @@ pub enum CreateSubscriptionOutcome {
     },
 }
 
+impl fmt::Debug for CreateSubscriptionOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Subscribed { fetch_last_message_outcome, subscription: _ } => f
+                .debug_struct("Subscribed")
+                .field("fetch_last_message_outcome", fetch_last_message_outcome)
+                .finish_non_exhaustive(),
+            Self::NotRegistered { new_message_callback: _, cancellation_callback: _ } => {
+                f.debug_struct("NotRegistered").finish_non_exhaustive()
+            }
+        }
+    }
+}
+
 /// Successful result of getting a message provider.
 pub enum GetMessageProviderOutcome {
     /// Service publisher is available and supports Get.
@@ -206,22 +221,18 @@ pub enum GetMessageProviderOutcome {
 
 impl fmt::Debug for GetMessageProviderOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Success(_) => "Success(<provider>)",
-                Self::GetNotSupported => "GetNotSupported",
-                Self::NotRegistered => "NotRegistered",
-            }
-        )
+        match self {
+            Self::Success(_) => f.debug_tuple("Success").finish_non_exhaustive(),
+            Self::GetNotSupported => write!(f, "GetNotSupported"),
+            Self::NotRegistered => write!(f, "NotRegistered"),
+        }
     }
 }
 
 /// Interface of the Service Publisher subscription.
 #[mockall::automock]
 #[async_trait]
-pub trait ServicePublisherSubscription: Send + Sync {
+pub trait ServicePublisherSubscription: Send + Sync + Debug {
     /// Ends the underlying subscription.
     async fn unsubscribe(self: Box<Self>);
 }

@@ -829,6 +829,7 @@ mod tests {
     use protobuf::MessageFull;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::parameterized_test;
     use std::f32::consts::PI as PIf32;
     use std::f64::consts::PI as PIf64;
@@ -918,10 +919,10 @@ mod tests {
             NodeValue::from_constant_leaf_node(&constant_leaf_node_double).unwrap(),
             NodeValue::Double(1.5)
         );
-        assert!(matches!(
+        assert_matches!(
             NodeValue::from_constant_leaf_node(&constant_leaf_node_none).unwrap_err(),
             NodeEvaluationError::ConstantValueNotSet
-        ));
+        );
     }
 
     #[test]
@@ -930,11 +931,9 @@ mod tests {
 
         let node_value = NodeValue::extract_value(Arc::clone(&msg), &[]).unwrap();
 
-        assert!(
-            matches!(
-                &node_value,
-                NodeValue::Message(inner_msg) if Arc::ptr_eq(inner_msg, &msg)),
-            "Unexpected result: {node_value:?}"
+        assert_matches!(
+            &node_value,
+            NodeValue::Message(inner_msg) if Arc::ptr_eq(inner_msg, &msg)
         );
     }
 
@@ -972,10 +971,10 @@ mod tests {
         let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE);
         let field_names = ["repeated_messages".to_owned(), "bool_field".to_owned()];
 
-        assert!(matches!(
+        assert_matches!(
             NodeValue::extract_value(msg, &field_names).unwrap_err(),
             NodeEvaluationError::WrongNestedFieldType { .. }
-        ));
+        );
     }
 
     #[test]
@@ -984,10 +983,10 @@ mod tests {
         msg.set_next_error(NodeEvaluationError::ConstantValueNotSet);
         let field_names = ["foo".to_owned()];
 
-        assert!(matches!(
+        assert_matches!(
             NodeValue::extract_value(msg, &field_names).unwrap_err(),
             NodeEvaluationError::ConstantValueNotSet
-        ));
+        );
     }
 
     #[test]

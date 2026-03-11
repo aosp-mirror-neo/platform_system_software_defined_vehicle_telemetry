@@ -249,6 +249,7 @@ mod tests {
 
     use self::mock::get_test_file_descriptors;
     use crate::metrics_config_orchestrator::message_builder::value_aggregator_factory::mock::MockValueAggregatorFactory;
+    use sdv_telemetry_test_utils::assert_matches;
 
     // Package and message name are in to src/test_utils/test_message.proto
     const INT_FIELD_NAME: &str = "int_field";
@@ -320,10 +321,7 @@ mod tests {
 
         let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. });
     }
 
     #[test]
@@ -339,10 +337,7 @@ mod tests {
 
         let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::MessageNotFound { .. });
     }
 
     #[test]
@@ -361,10 +356,7 @@ mod tests {
 
         let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. });
     }
 
     #[test]
@@ -383,10 +375,7 @@ mod tests {
 
         let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::FieldNotFound { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::FieldNotFound { .. });
     }
 
     #[test]
@@ -405,10 +394,7 @@ mod tests {
 
         let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. });
     }
 
     #[test]
@@ -455,10 +441,7 @@ mod tests {
         let err =
             factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. });
     }
 
     #[test]
@@ -475,10 +458,7 @@ mod tests {
         let err =
             factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::MessageNotFound { .. });
     }
 
     #[test]
@@ -498,10 +478,7 @@ mod tests {
         let err =
             factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. });
     }
 
     #[test]
@@ -521,10 +498,7 @@ mod tests {
         let err =
             factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::FieldNotFound { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::FieldNotFound { .. });
     }
 
     #[test]
@@ -544,9 +518,6 @@ mod tests {
         let err =
             factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
-        assert!(
-            matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. }),
-            "Unexpected error: {err}"
-        );
+        assert_matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. });
     }
 }
