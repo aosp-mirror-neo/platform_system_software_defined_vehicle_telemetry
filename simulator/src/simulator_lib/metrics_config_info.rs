@@ -64,6 +64,20 @@ impl ReportConfigStatus {
     }
 }
 
+impl Drop for ReportConfigStatus {
+    fn drop(&mut self) {
+        // While dropping `self.report_log` closes its file descriptor, it does not guarantee that
+        // the file's content has actually been written to disk. Calling `File::sync_all` before
+        // dropping (= closing) the file ensures that the content is written to disk.
+        //
+        // I suspect that this was the cause of some of our test flakiness, because I noticed that
+        // some test failures are caused by a seemingly truncated report log, which cannot have been
+        // caused by missing data, since the truncation happens in weird places (like the last line
+        // missing `\n` even though we always write a `\n` at the end of the line).
+        self.report_log.sync_all().expect("Failed to sync report log file.");
+    }
+}
+
 impl fmt::Display for ReportConfigStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.num_reports == 0 {

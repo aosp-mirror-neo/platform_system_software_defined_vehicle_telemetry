@@ -15,6 +15,9 @@
   "imports": [
     // keep-sorted start block=yes
     {
+      "path": "platform_testing/libraries/sdv/telemetry"
+    },
+    {
       "path": "system/software_defined_vehicle/samples/telemetry"
     }
     // keep-sorted end
@@ -83,9 +86,6 @@
     },
     {
       "name": "sdv_mt_telemetry_unit_utils_test"
-    },
-    {
-      "name": "sdv_telemetry_scenario_generator_unit_tests"
     }
     // keep-sorted end
   ],
