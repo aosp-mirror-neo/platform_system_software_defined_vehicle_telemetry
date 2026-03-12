@@ -15,7 +15,6 @@ package google.sdv.telemetry.configurable_publisher_sdk;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -23,12 +22,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import google.sdv.telemetry.configurable_publisher.IConfigurablePublisher;
-import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
-import google.sdv.telemetry.configurable_publisher.PublisherInfo;
-/**
- * Unit tests for the {@link PublisherInfoJava} constructor.
- */
+/** Unit tests for the {@link PublisherInfoJava} constructor. */
 @RunWith(AndroidJUnit4.class)
 public class PublisherInfoJavaTest {
     private static final String TEST_SERVICE_NAME = "TestService";
