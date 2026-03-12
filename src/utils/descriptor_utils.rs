@@ -168,7 +168,7 @@ mod tests {
                         // `MessageDescriptor::eq` is defined as pointer-equality, including the
                         // message's file descriptor, not value-equality. Hence, we fall back to
                         // just comparing the message names.
-                        some(pat!(&MessageDescriptor { full_name(): eq(&expected_full_name) }))
+                        some(pat!(&MessageDescriptor { full_name(): eq(&expected_full_name), .. }))
                     );
                 },
                 None => {

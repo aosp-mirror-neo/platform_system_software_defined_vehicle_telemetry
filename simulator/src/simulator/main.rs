@@ -270,6 +270,7 @@ mod tests {
                         .unwrap()
                         .value
                         == 1),
+                    ..
                 }),
                 pat!(MetricsReport {
                     metrics_config_uuid: eq("2834f669-e4c2-4d28-8dd7-3717fceff706"),
@@ -284,6 +285,7 @@ mod tests {
                         .unwrap()
                         .value
                         == 2),
+                    ..
                 }),
                 pat!(MetricsReport {
                     metrics_config_uuid: eq("2834f669-e4c2-4d28-8dd7-3717fceff706"),
@@ -298,6 +300,7 @@ mod tests {
                         .unwrap()
                         .value
                         == 3),
+                    ..
                 }),
             ]
         );

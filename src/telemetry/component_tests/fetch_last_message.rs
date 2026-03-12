@@ -293,8 +293,9 @@ async fn run_test(configs: Vec<bool>) {
                         .to_owned()
                         .into_option()
                         .map(|report_data| report_data.unpack::<Int64Value>()),
-                    some(ok(some(pat!(Int64Value { value: eq(expected_value) }))))
+                    some(ok(some(pat!(Int64Value { value: eq(expected_value), .. }))))
                 ),
+                ..
             }),
             configs.into_iter().map(|(config_uuid, fetch_last_message, _)| {
                 (config_uuid.to_string(), if *fetch_last_message { &123 } else { &0 })

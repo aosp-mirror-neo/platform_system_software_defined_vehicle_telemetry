@@ -1945,10 +1945,9 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
 
-        assert_that!(
+        assert_matches!(
             *publisher.state.lock().await,
-            pat!(ServicePublisherState::PendingActivation { callback_map, .. }
-                if callback_map.is_empty())
+            ServicePublisherState::PendingActivation { ref callback_map, .. } if callback_map.is_empty()
         );
     }
 
@@ -1964,10 +1963,9 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
 
-        assert_that!(
+        assert_matches!(
             *publisher.state.lock().await,
-            pat!(ServicePublisherState::PendingService { callback_map, .. }
-                if callback_map.is_empty())
+            ServicePublisherState::PendingService { ref callback_map, .. } if callback_map.is_empty()
         );
     }
 

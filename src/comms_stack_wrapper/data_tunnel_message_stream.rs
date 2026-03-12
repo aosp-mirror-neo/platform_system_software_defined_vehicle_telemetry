@@ -290,6 +290,7 @@ mod integration_tests {
                 message_count: eq(2),
                 message_size: eq(u32_into_usize(MESSAGE_SIZE)),
                 buffer: ref container_eq(vec![0; 2 * u32_into_usize(MESSAGE_SIZE)]),
+                ..
             })))
         );
     }

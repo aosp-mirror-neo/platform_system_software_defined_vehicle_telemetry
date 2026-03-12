@@ -785,7 +785,8 @@ mod tests {
             some(pat!(MetadataGeneration {
                 unit_identifier: pat!(&UnitIdentifier {
                     get_unit_name(): eq("unit1")
-                })
+                }),
+                ..
             }))
         );
 
@@ -803,7 +804,8 @@ mod tests {
             some(pat!(MetadataGeneration {
                 unit_identifier: pat!(&UnitIdentifier {
                     get_unit_name(): eq("unit2")
-                })
+                }),
+                ..
             }))
         );
 
