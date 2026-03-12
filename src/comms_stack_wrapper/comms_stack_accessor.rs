@@ -684,7 +684,9 @@ mod integration_tests {
                     message_descriptor: ref pat!(&MessageDescriptor {
                         name(): expected_name,
                         proto(): &expected_proto,
-                    })
+                        ..
+                    }),
+                    ..
                 })))
             );
         },

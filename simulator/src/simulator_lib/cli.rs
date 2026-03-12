@@ -242,6 +242,7 @@ mod tests {
                     max_report_count: some(eq(&5u64)),
                     sim_actions_path: none(),
                     output_directory: eq(&PathBuf::from("/data/local/tmp/telemetry_simulator_out")),
+                    ..
                 })
             })
         );
@@ -296,6 +297,7 @@ mod tests {
                     ]),
                     sim_actions_path: some(eq(&PathBuf::from("sim_actions.textproto"))),
                     output_directory: eq(&PathBuf::from("/foo/bar")),
+                    ..
                 }),
                 simulation_publisher_args: matches_pattern!(SimulationPublisherArgs {
                     publisher_config_paths: container_eq([
@@ -325,6 +327,7 @@ mod tests {
             matches_pattern!(Commands::TelemetryClient {
                 telemetry_client_args: matches_pattern!(TelemetryClientArgs {
                     max_report_count: none(),
+                    ..
                 })
             })
         );
@@ -349,7 +352,9 @@ mod tests {
             matches_pattern!(Commands::FullSimulation {
                 telemetry_client_args: matches_pattern!(TelemetryClientArgs {
                     max_report_count: none(),
-                })
+                    ..
+                }),
+                ..
             })
         );
     }

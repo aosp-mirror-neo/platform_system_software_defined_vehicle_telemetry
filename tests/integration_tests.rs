@@ -1045,7 +1045,8 @@ async fn telemetry_service_middleware() {
                     tire: result_of!(
                         |tire: &EnumOrUnknown<TireLocation>| tire.enum_value(),
                         ok(eq(tire_location))
-                    )
+                    ),
+                    ..
                 })
             )
             .is_ok()

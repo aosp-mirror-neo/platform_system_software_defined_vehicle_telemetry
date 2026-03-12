@@ -310,6 +310,7 @@ mod tests {
                     service_name: eq("test_service"),
                     message_name: eq(message_name),
                     file_descriptor_protos: container_eq(data_format_protos.iter().copied().cloned().collect::<Vec<_>>()),
+                    ..
                 }))
             );
         },
@@ -329,8 +330,8 @@ mod tests {
             assert_that!(result, matcher);
         },
 
-        textproto: ("valid_publisher_config.textproto", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
-        binary: ("valid_publisher_config.pb", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
+        textproto: ("valid_publisher_config.textproto", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true), .. }))),
+        binary: ("valid_publisher_config.pb", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true), .. }))),
         invalid_path: ("invalid_path/.", err(pat!(SimulatorError::FailedToParseFile { .. }))),
         invalid_extension: ("valid_publisher_config.txt", err(pat!(SimulatorError::FailedToParseFile { .. }))),
         invalid_textproto: ("invalid_publisher_config.textproto", err(pat!(SimulatorError::FailedToParseFile { .. }))),
@@ -372,6 +373,7 @@ mod tests {
                 ok(pat!(&PublisherConfig {
                     service_name: ref eq("test_service"),
                     publishing_strategy: ref publishing_strategy_type_matcher,
+                    ..
                 }))
             );
         },
@@ -436,6 +438,7 @@ mod tests {
             result,
             err(pat!(SimulatorError::FailedToParseFile {
                 error_message: eq("Specifying a publisher configuration is not allowed for SDV Comms Data Tunnel publishers."),
+                ..
             }))
         );
     }

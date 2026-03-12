@@ -16,13 +16,12 @@ package google.sdv.telemetry.descriptor_generator;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
-import com.google.protobuf.DescriptorProtos.FileDescriptorProto;
 import com.google.protobuf.DescriptorProtos.FileDescriptorSet;
 import com.squareup.javapoet.CodeBlock;
 import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.TypeSpec;
-import java.io.ByteArrayOutputStream;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -31,117 +30,139 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Year;
 import java.time.ZoneId;
-import java.util.List;
+
 import javax.lang.model.element.Modifier;
 
 /**
  * A host-side tool to generate a Java file containing a serialized protobuf FileDescriptorProto.
  */
 public final class ProtoDescriptorGenerator {
-  private static class Args {
-    @Parameter(
-        names = "--proto_file", required = true, description = "Path to the input .proto file.")
-    private String protoFile;
+    private static class Args {
+        @Parameter(
+                names = "--proto_file",
+                required = true,
+                description = "Path to the input .proto file.")
+        private String protoFile;
 
-    @Parameter(
-        names = "--protoc_tool", required = true, description = "Path to the protoc executable.")
-    private String protocTool;
+        @Parameter(
+                names = "--protoc_tool",
+                required = true,
+                description = "Path to the protoc executable.")
+        private String protocTool;
 
-    @Parameter(
-        names = "--output_file", required = true, description = "Path to the output .java file.")
-    private String outputFile;
+        @Parameter(
+                names = "--output_file",
+                required = true,
+                description = "Path to the output .java file.")
+        private String outputFile;
 
-    @Parameter(names = "--output_package", required = true,
-        description = "Java package for the generated class.")
-    private String outputPackage;
+        @Parameter(
+                names = "--output_package",
+                required = true,
+                description = "Java package for the generated class.")
+        private String outputPackage;
 
-    @Parameter(names = "--output_class", required = true,
-        description = "Name of the generated Java class.")
-    private String outputClass;
+        @Parameter(
+                names = "--output_class",
+                required = true,
+                description = "Name of the generated Java class.")
+        private String outputClass;
 
-    @Parameter(names = "--root_message_name", required = true,
-        description = "Fully qualified name of the root message.")
-    private String rootMessageName;
-  }
-
-  public static void main(String[] args) throws Exception {
-    Args jcArgs = new Args();
-    JCommander.newBuilder().addObject(jcArgs).build().parse(args);
-
-    Path protoFile = Paths.get(jcArgs.protoFile);
-    Path protocTool = Paths.get(jcArgs.protocTool);
-    Path outputFile = Paths.get(jcArgs.outputFile);
-    String outputPackage = jcArgs.outputPackage;
-    String outputClass = jcArgs.outputClass;
-    String rootMessageName = jcArgs.rootMessageName;
-
-    ProcessBuilder pb =
-        new ProcessBuilder(protocTool.toString(), "--descriptor_set_out=/dev/stdout",
-            "--proto_path=" + protoFile.getParent(), protoFile.toString());
-
-    Process process = pb.start();
-
-    // Read the descriptor set from the process's standard output
-    byte[] descriptorBytes;
-    try (InputStream stdout = process.getInputStream()) {
-      descriptorBytes = stdout.readAllBytes();
+        @Parameter(
+                names = "--root_message_name",
+                required = true,
+                description = "Fully qualified name of the root message.")
+        private String rootMessageName;
     }
 
-    int exitCode = process.waitFor();
+    public static void main(String[] args) throws Exception {
+        Args jcArgs = new Args();
+        JCommander.newBuilder().addObject(jcArgs).build().parse(args);
 
-    if (exitCode != 0) {
-      throw new RuntimeException("protoc tool execution failed with exit code: " + exitCode);
+        Path protoFile = Paths.get(jcArgs.protoFile);
+        Path protocTool = Paths.get(jcArgs.protocTool);
+        Path outputFile = Paths.get(jcArgs.outputFile);
+        String outputPackage = jcArgs.outputPackage;
+        String outputClass = jcArgs.outputClass;
+        String rootMessageName = jcArgs.rootMessageName;
+
+        ProcessBuilder pb =
+                new ProcessBuilder(
+                        protocTool.toString(),
+                        "--descriptor_set_out=/dev/stdout",
+                        "--proto_path=" + protoFile.getParent(),
+                        protoFile.toString());
+
+        Process process = pb.start();
+
+        // Read the descriptor set from the process's standard output
+        byte[] descriptorBytes;
+        try (InputStream stdout = process.getInputStream()) {
+            descriptorBytes = stdout.readAllBytes();
+        }
+
+        int exitCode = process.waitFor();
+
+        if (exitCode != 0) {
+            throw new RuntimeException("protoc tool execution failed with exit code: " + exitCode);
+        }
+
+        // It's possible for protoc to succeed but produce no output.
+        if (descriptorBytes.length == 0) {
+            String error =
+                    new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            throw new IOException(
+                    "protoc executed successfully but produced no output to stdout. "
+                            + "Stderr contents:\n"
+                            + error);
+        }
+
+        FileDescriptorSet descriptorSet = FileDescriptorSet.parseFrom(descriptorBytes);
+
+        Files.createDirectories(outputFile.getParent());
+
+        byte[] descriptorSetBytes = descriptorSet.toByteArray();
+
+        CodeBlock.Builder initializerBuilder = CodeBlock.builder();
+        initializerBuilder.add("new byte[] {");
+        initializerBuilder.indent();
+
+        for (int i = 0; i < descriptorSetBytes.length; i++) {
+            initializerBuilder.add("$L,", descriptorSetBytes[i]);
+        }
+
+        initializerBuilder.unindent();
+        initializerBuilder.add("\n}");
+        CodeBlock descriptorSetInitializer = initializerBuilder.build();
+
+        FieldSpec rootMessageField =
+                FieldSpec.builder(String.class, "ROOT_MESSAGE_NAME")
+                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+                        .initializer("$S", "." + rootMessageName)
+                        .build();
+
+        FieldSpec descriptorSetField =
+                FieldSpec.builder(byte[].class, "FILE_DESCRIPTOR_SET")
+                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+                        .initializer(descriptorSetInitializer)
+                        .build();
+
+        TypeSpec generatedClass =
+                TypeSpec.classBuilder(outputClass)
+                        .addJavadoc(
+                                "Generated by $L. DO NOT EDIT",
+                                ProtoDescriptorGenerator.class.getSimpleName())
+                        .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
+                        .addField(rootMessageField)
+                        .addField(descriptorSetField)
+                        .build();
+
+        String currentYear = String.valueOf(Year.now(ZoneId.systemDefault()).getValue());
+
+        JavaFile javaFile = JavaFile.builder(outputPackage, generatedClass).build();
+
+        // This is done to bypass javaFile creation of all package subdirectories
+        Files.write(
+                outputFile, javaFile.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
-
-    // It's possible for protoc to succeed but produce no output.
-    if (descriptorBytes.length == 0) {
-      String error = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-      throw new IOException("protoc executed successfully but produced no output to stdout. "
-          + "Stderr contents:\n" + error);
-    }
-
-    FileDescriptorSet descriptorSet = FileDescriptorSet.parseFrom(descriptorBytes);
-
-    Files.createDirectories(outputFile.getParent());
-
-    byte[] descriptorSetBytes = descriptorSet.toByteArray();
-
-    CodeBlock.Builder initializerBuilder = CodeBlock.builder();
-    initializerBuilder.add("new byte[] {");
-    initializerBuilder.indent();
-
-    for (int i = 0; i < descriptorSetBytes.length; i++) {
-      initializerBuilder.add("$L,", descriptorSetBytes[i]);
-    }
-
-    initializerBuilder.unindent();
-    initializerBuilder.add("\n}");
-    CodeBlock descriptorSetInitializer = initializerBuilder.build();
-
-    FieldSpec rootMessageField = FieldSpec.builder(String.class, "ROOT_MESSAGE_NAME")
-                                     .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
-                                     .initializer("$S", "." + rootMessageName)
-                                     .build();
-
-    FieldSpec descriptorSetField =
-        FieldSpec.builder(byte[].class, "FILE_DESCRIPTOR_SET")
-            .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
-            .initializer(descriptorSetInitializer)
-            .build();
-
-    TypeSpec generatedClass = TypeSpec.classBuilder(outputClass)
-                                  .addJavadoc("Generated by $L. DO NOT EDIT",
-                                      ProtoDescriptorGenerator.class.getSimpleName())
-                                  .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
-                                  .addField(rootMessageField)
-                                  .addField(descriptorSetField)
-                                  .build();
-
-    String currentYear = String.valueOf(Year.now(ZoneId.systemDefault()).getValue());
-
-    JavaFile javaFile = JavaFile.builder(outputPackage, generatedClass).build();
-
-    // This is done to bypass javaFile creation of all package subdirectories
-    Files.write(outputFile, javaFile.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-  }
 }

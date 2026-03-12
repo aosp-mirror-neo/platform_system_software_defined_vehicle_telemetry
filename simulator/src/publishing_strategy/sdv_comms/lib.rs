@@ -177,7 +177,7 @@ mod tests {
         expect_that!(
             result,
             some(ok(downcast_ref::<dyn PublishingStrategy, DataTunnelPublishingStrategy, _>(
-                pat!(&DataTunnelPublishingStrategy { message_count: 1, message_size: 2 })
+                pat!(&DataTunnelPublishingStrategy { message_count: 1, message_size: 2, .. })
             )))
         );
     }
@@ -230,6 +230,7 @@ mod tests {
                     pat!(&MessageMetadata {
                         file_descriptors: ref container_eq(file_descriptors),
                         message_full_name: ref eq(".my.package.MyMessage"),
+                        ..
                     }),
                 ))
             );

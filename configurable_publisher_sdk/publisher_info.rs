@@ -80,6 +80,7 @@ mod tests {
                 messageTypeName: eq("test_message"),
                 supportsGet: eq(true),
                 fileDescriptorProto: none(),
+                ..
             })
         );
     }

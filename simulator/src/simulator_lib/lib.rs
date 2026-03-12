@@ -470,9 +470,9 @@ mod tests {
             assert_that!(result, matcher);
         },
 
-        none: (None, ok(pat!(SimulationActionsProto { actions: len(eq(0)) }))),
-        txtpb: (Some("valid_simulation_actions.txtpb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
-        pb: (Some("valid_simulation_actions.pb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
+        none: (None, ok(pat!(SimulationActionsProto { actions: len(eq(0)), .. }))),
+        txtpb: (Some("valid_simulation_actions.txtpb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)), .. }))),
+        pb: (Some("valid_simulation_actions.pb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)), .. }))),
         invalid: (Some("invalid_simulation_actions.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
         does_not_exist: (Some("does_not_exist.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
     );

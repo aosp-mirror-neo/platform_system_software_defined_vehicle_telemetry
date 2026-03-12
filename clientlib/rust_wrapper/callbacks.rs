@@ -559,7 +559,7 @@ mod tests {
             }
         });
 
-        expect_that!(result, ok(pat!(MetricsReport { report_number: &123 })));
+        expect_that!(result, ok(pat!(MetricsReport { report_number: &123, .. })));
     }
 
     #[googletest::test]
@@ -644,8 +644,8 @@ mod tests {
         expect_that!(
             result,
             ok(elements_are![
-                pat!(ReportInfo { config_uuid: "config1", report_uuid: "report1" }),
-                pat!(ReportInfo { config_uuid: "config2", report_uuid: "report2" }),
+                pat!(ReportInfo { config_uuid: "config1", report_uuid: "report1", .. }),
+                pat!(ReportInfo { config_uuid: "config2", report_uuid: "report2", .. }),
             ])
         );
     }
