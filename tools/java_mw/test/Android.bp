@@ -13,13 +13,14 @@
 // limitations under the License.
 
 // Generates the Java source file from the test proto
-gensrcs {
+genrule {
     name: "sdv_telemetry_descriptor_generator_test_output",
     tools: ["sdv_telemetry_descriptor_generator"],
     srcs: ["reference_files/TestMessageSchema.proto"],
-    output_extension: "java",
+    out: ["reference_files/TestMessageSchema.java"],
     cmd: "$(location sdv_telemetry_descriptor_generator) " +
-        "--proto_file $(location reference_files/TestMessageSchema.proto) " +
+        "--proto_file $(in) " +
+        "--proto_path $$(dirname $(in)) " +
         "--output_file $(out) " +
         "--output_package com.google.android.sdv.telemetry.schemas " +
         "--output_class TestMessageSchema " +

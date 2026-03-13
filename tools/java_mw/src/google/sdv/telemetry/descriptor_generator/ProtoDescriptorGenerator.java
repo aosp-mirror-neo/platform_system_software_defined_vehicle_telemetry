@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
@@ -48,6 +49,16 @@ public final class ProtoDescriptorGenerator {
                 required = true,
                 description = "Path to the input .proto file.")
         private String protoFile;
+
+        @Parameter(
+                names = "--proto_path",
+                required = true,
+                description =
+                        "Specify the directory in which to search for imports. May be specified"
+                            + " multiple times; directories will be searched in order. The file"
+                            + " provided via `--proto_file` must also be in a directory provided"
+                            + " via `--proto_path`.")
+        private List<String> protoPaths = new ArrayList<>();
 
         @Parameter(
                 names = "--output_file",
@@ -91,19 +102,19 @@ public final class ProtoDescriptorGenerator {
                         .orElseGet(() -> Path.of("aprotoc"));
 
         Path protoFile = Paths.get(jcArgs.protoFile);
+        List<Path> protoPaths = jcArgs.protoPaths.stream().map(Paths::get).toList();
         Path outputFile = Paths.get(jcArgs.outputFile);
         String outputPackage = jcArgs.outputPackage;
         String outputClass = jcArgs.outputClass;
         String rootMessageName = jcArgs.rootMessageName;
 
-        Process process =
-                new ProcessBuilder(
-                                aprotocPath.toString(),
-                                "--descriptor_set_out=/dev/stdout",
-                                "--include_imports",
-                                "--proto_path=" + protoFile.getParent(),
-                                protoFile.toString())
-                        .start();
+        List<String> command = new ArrayList<>();
+        command.add(aprotocPath.toString());
+        command.add("--descriptor_set_out=/dev/stdout");
+        command.add("--include_imports");
+        protoPaths.stream().map(p -> "--proto_path=" + p).forEach(command::add);
+        command.add(protoFile.toString());
+        Process process = new ProcessBuilder(command).start();
 
         var stdoutFuture =
                 CompletableFuture.supplyAsync(

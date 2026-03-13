@@ -82,6 +82,7 @@ public final class ProtoDescriptorGeneratorTest {
     public void testGeneration_fromProtoWithSyntaxError_failsWithProtocError() throws Exception {
         String[] args = {
             "--proto_file", "./reference_files/InvalidMessageSchema.proto",
+            "--proto_path", "./reference_files",
             "--output_file", "InvalidMessageSchema.java",
             "--output_class", "InvalidMessageSchema",
             "--output_package", "com.google.android.sdv.telemetry.schemas",
@@ -122,7 +123,66 @@ public final class ProtoDescriptorGeneratorTest {
                 """);
 
         String[] args = {
+            "--proto_file",
+            message1File.toString(),
+            "--proto_path",
+            message1File.getParent().toString(),
+            "--root_message_name",
+            "test.Message1",
+            "--output_file",
+            outputFile.toString(),
+            "--output_class",
+            "OutputClass",
+            "--output_package",
+            ""
+        };
+        ProtoDescriptorGenerator.main(args);
+
+        ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
+        assertThat(result.rootMessageName).isEqualTo(".test.Message1");
+
+        assertThat(result.fds.getFileCount()).isEqualTo(2);
+        FileDescriptorProto file1FdProto = getFdByName(result.fds, "Message1.proto");
+        FileDescriptorProto file2FdProto = getFdByName(result.fds, "Message2.proto");
+
+        FileDescriptor file2Fd = FileDescriptor.buildFrom(file2FdProto, new FileDescriptor[0]);
+        assertThat(file2Fd.findMessageTypeByName("Message2")).isNotNull();
+
+        FileDescriptor file1Fd =
+                FileDescriptor.buildFrom(file1FdProto, new FileDescriptor[] {file2Fd});
+        assertThat(file1Fd.findMessageTypeByName("Message1")).isNotNull();
+    }
+
+    @Test
+    public void testGeneration_withProtoFileImportingAnotherProtoFileInOtherDirectory_succeeds()
+            throws Exception {
+        Path outputFile = getTempDir().resolve("OutputClass.java");
+
+        Path message1File =
+                writeTempFile(
+                        "dir1/Message1.proto",
+                        """
+                        syntax = "proto3";
+                        package test;
+
+                        import "Message2.proto";
+
+                        message Message1 { Message2 b = 1; }
+                        """);
+        Path message2File =
+                writeTempFile(
+                        "dir2/Message2.proto",
+                        """
+                        syntax = "proto3";
+                        package test;
+
+                        message Message2 { int32 value = 1; }
+                        """);
+
+        String[] args = {
             "--proto_file", message1File.toString(),
+            "--proto_path", message1File.getParent().toString(),
+            "--proto_path", message2File.getParent().toString(),
             "--root_message_name", "test.Message1",
             "--output_file", outputFile.toString(),
             "--output_class", "OutputClass",
@@ -145,8 +205,9 @@ public final class ProtoDescriptorGeneratorTest {
         assertThat(file1Fd.findMessageTypeByName("Message1")).isNotNull();
     }
 
-    private Path writeTempFile(String name, String content) throws IOException {
-        Path filePath = getTempDir().resolve(name);
+    private Path writeTempFile(String relativePath, String content) throws IOException {
+        Path filePath = getTempDir().resolve(relativePath);
+        Files.createDirectories(filePath.getParent());
         Files.writeString(filePath, content);
         return filePath;
     }
