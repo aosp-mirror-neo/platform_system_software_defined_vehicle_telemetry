@@ -100,6 +100,7 @@ public final class ProtoDescriptorGenerator {
                 new ProcessBuilder(
                                 aprotocPath.toString(),
                                 "--descriptor_set_out=/dev/stdout",
+                                "--include_imports",
                                 "--proto_path=" + protoFile.getParent(),
                                 protoFile.toString())
                         .start();
