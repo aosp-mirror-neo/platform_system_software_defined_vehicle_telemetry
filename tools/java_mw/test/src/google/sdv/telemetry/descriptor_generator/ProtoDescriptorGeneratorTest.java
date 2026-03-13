@@ -205,6 +205,106 @@ public final class ProtoDescriptorGeneratorTest {
         assertThat(file1Fd.findMessageTypeByName("Message1")).isNotNull();
     }
 
+    @Test
+    public void testGeneration_withUnusedImport_fails() throws Exception {
+        Path outputFile = getTempDir().resolve("OutputClass.java");
+
+        Path message1File =
+                writeTempFile(
+                        "Message1.proto",
+                        """
+                        syntax = "proto3";
+                        package test;
+
+                        import "Message2.proto"; // This import is unused.
+
+                        message Message1 { int32 value = 1; }
+                        """);
+        writeTempFile(
+                "Message2.proto",
+                """
+                syntax = "proto3";
+
+                package test;
+
+                message Message2 { int32 value = 1; }
+                """);
+
+        String[] args = {
+            "--proto_file",
+            message1File.toString(),
+            "--proto_path",
+            message1File.getParent().toString(),
+            "--root_message_name",
+            "test.Message1",
+            "--output_file",
+            outputFile.toString(),
+            "--output_class",
+            "OutputClass",
+            "--output_package",
+            ""
+        };
+        var e = assertThrows(RuntimeException.class, () -> ProtoDescriptorGenerator.main(args));
+        assertThat(e).hasMessageThat().contains("warning: Import Message2.proto is unused.");
+    }
+
+    @Test
+    public void testGeneration_withUnusedImport_succeedsIfWarningsNonFatal() throws Exception {
+        Path outputFile = getTempDir().resolve("OutputClass.java");
+
+        Path message1File =
+                writeTempFile(
+                        "Message1.proto",
+                        """
+                        syntax = "proto3";
+                        package test;
+
+                        import "Message2.proto"; // This import is unused.
+
+                        message Message1 { int32 value = 1; }
+                        """);
+        writeTempFile(
+                "Message2.proto",
+                """
+                syntax = "proto3";
+
+                package test;
+
+                message Message2 { int32 value = 1; }
+                """);
+
+        String[] args = {
+            "--fatal_warnings",
+            "false",
+            "--proto_file",
+            message1File.toString(),
+            "--proto_path",
+            message1File.getParent().toString(),
+            "--root_message_name",
+            "test.Message1",
+            "--output_file",
+            outputFile.toString(),
+            "--output_class",
+            "OutputClass",
+            "--output_package",
+            ""
+        };
+        ProtoDescriptorGenerator.main(args);
+
+        ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
+        assertThat(result.rootMessageName).isEqualTo(".test.Message1");
+
+        assertThat(result.fds.getFileCount()).isEqualTo(2);
+        FileDescriptorProto file1FdProto = getFdByName(result.fds, "Message1.proto");
+        FileDescriptorProto file2FdProto = getFdByName(result.fds, "Message2.proto");
+
+        FileDescriptor file2Fd = FileDescriptor.buildFrom(file2FdProto, new FileDescriptor[0]);
+        assertThat(file2Fd.findMessageTypeByName("Message2")).isNotNull();
+
+        FileDescriptor file1Fd = FileDescriptor.buildFrom(file1FdProto, new FileDescriptor[0]);
+        assertThat(file1Fd.findMessageTypeByName("Message1")).isNotNull();
+    }
+
     private Path writeTempFile(String relativePath, String content) throws IOException {
         Path filePath = getTempDir().resolve(relativePath);
         Files.createDirectories(filePath.getParent());

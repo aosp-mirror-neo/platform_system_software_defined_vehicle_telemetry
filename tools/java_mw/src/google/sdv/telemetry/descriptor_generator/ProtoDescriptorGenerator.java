@@ -61,6 +61,12 @@ public final class ProtoDescriptorGenerator {
         private List<String> protoPaths = new ArrayList<>();
 
         @Parameter(
+                names = "--fatal_warnings",
+                description = "Treat warnings as errors. Defaults to `true`.",
+                arity = 1)
+        private boolean fatalWarnings = true;
+
+        @Parameter(
                 names = "--output_file",
                 required = true,
                 description = "Path to the output .java file.")
@@ -107,9 +113,13 @@ public final class ProtoDescriptorGenerator {
         String outputPackage = jcArgs.outputPackage;
         String outputClass = jcArgs.outputClass;
         String rootMessageName = jcArgs.rootMessageName;
+        boolean fatalWarnings = jcArgs.fatalWarnings;
 
         List<String> command = new ArrayList<>();
         command.add(aprotocPath.toString());
+        if (fatalWarnings) {
+            command.add("--fatal_warnings");
+        }
         command.add("--descriptor_set_out=/dev/stdout");
         command.add("--include_imports");
         protoPaths.stream().map(p -> "--proto_path=" + p).forEach(command::add);
