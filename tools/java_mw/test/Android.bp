@@ -35,7 +35,12 @@ java_test_host {
         "src/google/sdv/telemetry/descriptor_generator/ProtoDescriptorGeneratorTest.java",
         // keep-sorted end
     ],
-    data: ["reference_files/InvalidMessageSchema.proto"],
+    data: [
+        // keep-sorted start
+        "reference_files/InvalidMessageSchema.proto",
+        "reference_files/TestMessageSchema.proto",
+        // keep-sorted end
+    ],
     static_libs: [
         // keep-sorted start
         "junit",

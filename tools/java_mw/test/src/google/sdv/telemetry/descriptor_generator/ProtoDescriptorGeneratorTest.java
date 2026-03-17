@@ -142,6 +142,27 @@ public final class ProtoDescriptorGeneratorTest {
     }
 
     @Test
+    public void testGeneration_fromProtoWithRootMessageNameNotFound_fails() throws Exception {
+        String[] args = {
+            "--proto_file", "./reference_files/TestMessageSchema.proto",
+            "--proto_path", "./reference_files",
+            "--output_file", "TestMessageSchema.java",
+            "--output_class", "TestMessageSchema",
+            "--output_package", "com.google.android.sdv.telemetry.schemas",
+            "--message_full_name", "com.example.NonExistingMessage"
+        };
+
+        var thrown =
+                assertThrows(RuntimeException.class, () -> ProtoDescriptorGenerator.main(args));
+        assertThat(thrown)
+                .hasMessageThat()
+                .isEqualTo(
+                        "Message named 'com.example.NonExistingMessage' not found in descriptor"
+                                + " set. Available message names:"
+                                + " com.google.sdv.telemetry.test.TestMessage");
+    }
+
+    @Test
     public void testGeneration_withProtoFileImportingAnotherProtoFileInOtherDirectory_succeeds()
             throws Exception {
         Path outputFile = getTempDir().resolve("OutputClass.java");

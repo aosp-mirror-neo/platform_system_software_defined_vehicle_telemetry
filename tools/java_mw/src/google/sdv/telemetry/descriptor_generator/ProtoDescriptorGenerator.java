@@ -162,6 +162,21 @@ public final class ProtoDescriptorGenerator {
         }
 
         FileDescriptorSet descriptorSet = FileDescriptorSet.parseFrom(stdout);
+        var messageNames =
+                descriptorSet.getFileList().stream()
+                        .flatMap(
+                                f ->
+                                        f.getMessageTypeList().stream()
+                                                .map(m -> f.getPackage() + "." + m.getName()))
+                        .toList();
+        if (!messageNames.stream().anyMatch(n -> n.equals(messageFullName))) {
+            throw new RuntimeException(
+                    "Message named '"
+                            + messageFullName
+                            + "' not found in descriptor set. Available message names: "
+                            + String.join(", ", messageNames));
+        }
+
         byte[] descriptorSetBytes = descriptorSet.toByteArray();
 
         var blocks = new ArrayList<CodeBlock>();
