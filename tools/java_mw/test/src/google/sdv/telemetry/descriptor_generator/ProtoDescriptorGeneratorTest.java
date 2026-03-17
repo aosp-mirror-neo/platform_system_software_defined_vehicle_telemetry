@@ -30,7 +30,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -41,9 +40,6 @@ import javax.tools.ToolProvider;
 
 @RunWith(JUnit4.class)
 public final class ProtoDescriptorGeneratorTest {
-    private static final String EXPECTED_ROOT_MESSAGE_NAME =
-            ".com.google.sdv.telemetry.test.TestMessage";
-
     @Rule public TemporaryFolder mTempDir = new TemporaryFolder();
 
     private Path getTempDir() {
@@ -51,28 +47,20 @@ public final class ProtoDescriptorGeneratorTest {
     }
 
     @Test
-    public void testGeneratedClass_hasCorrectRootMessageName() throws Exception {
-        // This test loads the compiled class and checks the root message name constant.
+    public void testGeneratedClass_containsExpectedData() throws Exception {
         Class<?> generatedClass =
                 Class.forName("com.google.android.sdv.telemetry.schemas.TestMessageSchema");
-        Field rootMessageNameField = generatedClass.getField("ROOT_MESSAGE_NAME");
-        String rootMessageName = (String) rootMessageNameField.get(null);
-        assertThat(rootMessageName).isEqualTo(EXPECTED_ROOT_MESSAGE_NAME);
-    }
 
-    @Test
-    public void testGeneratedClass_hasValidDescriptor() throws Exception {
-        // This test validates that the FILE_DESCRIPTOR_SET byte array is a valid FileDescriptorSet
-        // and that the necessary message types can be resolved from it.
-        Class<?> generatedClass =
-                Class.forName("com.google.android.sdv.telemetry.schemas.TestMessageSchema");
-        Field descriptorSetField = generatedClass.getField("FILE_DESCRIPTOR_SET");
-        byte[] descriptorSetBytes = (byte[]) descriptorSetField.get(null);
+        var messageFullName = (String) generatedClass.getMethod("getMessageFullName").invoke(null);
+        var descriptorSetBytes =
+                (byte[]) generatedClass.getMethod("getFileDescriptorSet").invoke(null);
+
+        assertThat(messageFullName).isEqualTo(".com.google.sdv.telemetry.test.TestMessage");
 
         FileDescriptorSet fileDescriptorSet = FileDescriptorSet.parseFrom(descriptorSetBytes);
+        assertThat(fileDescriptorSet.getFileCount()).isEqualTo(1);
         FileDescriptorProto fileDescriptorProto = fileDescriptorSet.getFile(0);
         assertThat(fileDescriptorProto.getName()).isEqualTo("TestMessageSchema.proto");
-
         FileDescriptor fileDescriptor =
                 FileDescriptor.buildFrom(fileDescriptorProto, new FileDescriptor[0]);
         assertThat(fileDescriptor.findMessageTypeByName("TestMessage")).isNotNull();
@@ -86,7 +74,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--output_file", "InvalidMessageSchema.java",
             "--output_class", "InvalidMessageSchema",
             "--output_package", "com.google.android.sdv.telemetry.schemas",
-            "--root_message_name", "com.google.sdv.telemetry.test.InvalidMessage"
+            "--message_full_name", "com.google.sdv.telemetry.test.InvalidMessage"
         };
 
         var thrown =
@@ -127,7 +115,7 @@ public final class ProtoDescriptorGeneratorTest {
             message1File.toString(),
             "--proto_path",
             message1File.getParent().toString(),
-            "--root_message_name",
+            "--message_full_name",
             "test.Message1",
             "--output_file",
             outputFile.toString(),
@@ -139,7 +127,7 @@ public final class ProtoDescriptorGeneratorTest {
         ProtoDescriptorGenerator.main(args);
 
         ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
-        assertThat(result.rootMessageName).isEqualTo(".test.Message1");
+        assertThat(result.messageFullName).isEqualTo(".test.Message1");
 
         assertThat(result.fds.getFileCount()).isEqualTo(2);
         FileDescriptorProto file1FdProto = getFdByName(result.fds, "Message1.proto");
@@ -183,7 +171,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--proto_file", message1File.toString(),
             "--proto_path", message1File.getParent().toString(),
             "--proto_path", message2File.getParent().toString(),
-            "--root_message_name", "test.Message1",
+            "--message_full_name", "test.Message1",
             "--output_file", outputFile.toString(),
             "--output_class", "OutputClass",
             "--output_package", ""
@@ -191,7 +179,7 @@ public final class ProtoDescriptorGeneratorTest {
         ProtoDescriptorGenerator.main(args);
 
         ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
-        assertThat(result.rootMessageName).isEqualTo(".test.Message1");
+        assertThat(result.messageFullName).isEqualTo(".test.Message1");
 
         assertThat(result.fds.getFileCount()).isEqualTo(2);
         FileDescriptorProto file1FdProto = getFdByName(result.fds, "Message1.proto");
@@ -235,7 +223,7 @@ public final class ProtoDescriptorGeneratorTest {
             message1File.toString(),
             "--proto_path",
             message1File.getParent().toString(),
-            "--root_message_name",
+            "--message_full_name",
             "test.Message1",
             "--output_file",
             outputFile.toString(),
@@ -280,7 +268,7 @@ public final class ProtoDescriptorGeneratorTest {
             message1File.toString(),
             "--proto_path",
             message1File.getParent().toString(),
-            "--root_message_name",
+            "--message_full_name",
             "test.Message1",
             "--output_file",
             outputFile.toString(),
@@ -292,7 +280,7 @@ public final class ProtoDescriptorGeneratorTest {
         ProtoDescriptorGenerator.main(args);
 
         ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
-        assertThat(result.rootMessageName).isEqualTo(".test.Message1");
+        assertThat(result.messageFullName).isEqualTo(".test.Message1");
 
         assertThat(result.fds.getFileCount()).isEqualTo(2);
         FileDescriptorProto file1FdProto = getFdByName(result.fds, "Message1.proto");
@@ -322,7 +310,7 @@ public final class ProtoDescriptorGeneratorTest {
         return null;
     }
 
-    private static record ClassParseResult(FileDescriptorSet fds, String rootMessageName) {}
+    private static record ClassParseResult(FileDescriptorSet fds, String messageFullName) {}
 
     private static ClassParseResult parseGeneratedJavaClass(Path path, String className)
             throws Exception {
@@ -338,10 +326,10 @@ public final class ProtoDescriptorGeneratorTest {
         Class<?> cls = Class.forName(className, true, classLoader);
 
         // Step 3: Read the generated fields.
-        var fileDescriptorSetBytes = (byte[]) cls.getField("FILE_DESCRIPTOR_SET").get(null);
-        var rootMessageName = (String) cls.getField("ROOT_MESSAGE_NAME").get(null);
+        var fileDescriptorSetBytes = (byte[]) cls.getMethod("getFileDescriptorSet").invoke(null);
+        var messageFullName = (String) cls.getMethod("getMessageFullName").invoke(null);
 
         return new ClassParseResult(
-                FileDescriptorSet.parseFrom(fileDescriptorSetBytes), rootMessageName);
+                FileDescriptorSet.parseFrom(fileDescriptorSetBytes), messageFullName);
     }
 }
