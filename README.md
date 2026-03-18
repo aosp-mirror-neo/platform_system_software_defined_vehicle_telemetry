@@ -39,8 +39,8 @@ m -j
 
 ## Test instructions
 
-Check the readme inside samples folder for instructions on how to experiment
-with the sample client applications.
+Check the samples [README.md](../samples/telemetry/README.md) for instructions
+on how to experiment with the sample client applications.
 
 Use the `tests/run_all_tests.sh` script to run all unit and integration tests:
 
@@ -52,9 +52,7 @@ If you want to run specific tests only, use the instructions below.
 
 ### Unit Test Instructions
 
-Starting with [ag/25844146](http://ag/25844146) unit tests are converted to
-device side tests and instructions have changed. Run `cvd create` in a different
-terminal:
+Run `cvd create` in a different terminal:
 
 ```bash
 cvd create
@@ -77,7 +75,7 @@ cvd create
 Run the tests:
 
 ```bash
-atest sdv_telemetry_integration_tests
+NOTIFY_AS_NATIVE=0.0.0.0:6520 atest sdv_telemetry_integration_tests
 ```
 
 ## Configure, Build, Run and Test Telemetry Service on an IVI target variant
