@@ -67,6 +67,9 @@
       "name": "sdv_mt_telemetry_unit_platform_abstraction_layer_test"
     },
     {
+      "name": "sdv_mt_telemetry_unit_sdk_configurable_publisher_registry_rust_test"
+    },
+    {
       "name": "sdv_mt_telemetry_unit_service_publisher_accessor_test"
     },
     {
