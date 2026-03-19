@@ -20,16 +20,21 @@ import com.google.protobuf.DescriptorProtos.FileDescriptorSet;
 import com.squareup.javapoet.CodeBlock;
 import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeSpec;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Year;
-import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 import javax.lang.model.element.Modifier;
 
@@ -37,6 +42,8 @@ import javax.lang.model.element.Modifier;
  * A host-side tool to generate a Java file containing a serialized protobuf FileDescriptorProto.
  */
 public final class ProtoDescriptorGenerator {
+    private static final Charset UTF_8 = StandardCharsets.UTF_8;
+
     private static class Args {
         @Parameter(
                 names = "--proto_file",
@@ -45,10 +52,20 @@ public final class ProtoDescriptorGenerator {
         private String protoFile;
 
         @Parameter(
-                names = "--protoc_tool",
+                names = "--proto_path",
                 required = true,
-                description = "Path to the protoc executable.")
-        private String protocTool;
+                description =
+                        "Specify the directory in which to search for imports. May be specified"
+                            + " multiple times; directories will be searched in order. The file"
+                            + " provided via `--proto_file` must also be in a directory provided"
+                            + " via `--proto_path`.")
+        private List<String> protoPaths = new ArrayList<>();
+
+        @Parameter(
+                names = "--fatal_warnings",
+                description = "Treat warnings as errors. Defaults to `true`.",
+                arity = 1)
+        private boolean fatalWarnings = true;
 
         @Parameter(
                 names = "--output_file",
@@ -69,100 +86,153 @@ public final class ProtoDescriptorGenerator {
         private String outputClass;
 
         @Parameter(
-                names = "--root_message_name",
+                names = "--message_full_name",
                 required = true,
-                description = "Fully qualified name of the root message.")
-        private String rootMessageName;
+                description = "Fully qualified name of the message.")
+        private String messageFullName;
     }
 
     public static void main(String[] args) throws Exception {
         Args jcArgs = new Args();
         JCommander.newBuilder().addObject(jcArgs).build().parse(args);
 
+        // When run in a genrule, we need to access `aprotoc` from `./tools/out/bin`. When run in a
+        // test, we need to access `aprotoc` from `.` When run outside of a genrule, we need to
+        // access `aprotoc` from path. Since there is no good way to detect whether we are running
+        // as part of a genrule or a test, use existence of the `aprotoc` binary in
+        // `./tools/out/bin` and `.` as an indicator.
+        Path aprotocPath =
+                Stream.of("./tools/out/bin/aprotoc", "./aprotoc")
+                        .map(Path::of)
+                        .filter(Files::exists)
+                        .findFirst()
+                        .orElseGet(() -> Path.of("aprotoc"));
+
         Path protoFile = Paths.get(jcArgs.protoFile);
-        Path protocTool = Paths.get(jcArgs.protocTool);
+        List<Path> protoPaths = jcArgs.protoPaths.stream().map(Paths::get).toList();
         Path outputFile = Paths.get(jcArgs.outputFile);
         String outputPackage = jcArgs.outputPackage;
         String outputClass = jcArgs.outputClass;
-        String rootMessageName = jcArgs.rootMessageName;
+        String messageFullName = jcArgs.messageFullName;
+        boolean fatalWarnings = jcArgs.fatalWarnings;
 
-        ProcessBuilder pb =
-                new ProcessBuilder(
-                        protocTool.toString(),
-                        "--descriptor_set_out=/dev/stdout",
-                        "--proto_path=" + protoFile.getParent(),
-                        protoFile.toString());
-
-        Process process = pb.start();
-
-        // Read the descriptor set from the process's standard output
-        byte[] descriptorBytes;
-        try (InputStream stdout = process.getInputStream()) {
-            descriptorBytes = stdout.readAllBytes();
+        List<String> command = new ArrayList<>();
+        command.add(aprotocPath.toString());
+        if (fatalWarnings) {
+            command.add("--fatal_warnings");
         }
+        command.add("--descriptor_set_out=/dev/stdout");
+        command.add("--include_imports");
+        protoPaths.stream().map(p -> "--proto_path=" + p).forEach(command::add);
+        command.add(protoFile.toString());
+        Process process = new ProcessBuilder(command).start();
 
+        var stdoutFuture =
+                CompletableFuture.supplyAsync(
+                        () -> {
+                            try (InputStream stdout = process.getInputStream()) {
+                                return stdout.readAllBytes();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        var stderrFuture =
+                CompletableFuture.supplyAsync(
+                        () -> {
+                            try (InputStream stderr = process.getErrorStream()) {
+                                return stderr.readAllBytes();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
         int exitCode = process.waitFor();
+        byte[] stdout = stdoutFuture.join();
+        byte[] stderr = stderrFuture.join();
 
         if (exitCode != 0) {
-            throw new RuntimeException("protoc tool execution failed with exit code: " + exitCode);
+            String error = new String(stderr, UTF_8);
+            throw new RuntimeException(
+                    "protoc execution failed (exit code: " + exitCode + ").\n" + error);
         }
 
-        // It's possible for protoc to succeed but produce no output.
-        if (descriptorBytes.length == 0) {
-            String error =
-                    new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-            throw new IOException(
-                    "protoc executed successfully but produced no output to stdout. "
-                            + "Stderr contents:\n"
-                            + error);
+        // It's possible for protoc to succeed but not produce any output.
+        if (stdout.length == 0) {
+            String error = new String(stderr, UTF_8);
+            throw new IOException("protoc execution succeeded but produced no output.\n" + error);
         }
 
-        FileDescriptorSet descriptorSet = FileDescriptorSet.parseFrom(descriptorBytes);
-
-        Files.createDirectories(outputFile.getParent());
+        FileDescriptorSet descriptorSet = FileDescriptorSet.parseFrom(stdout);
+        var messageNames =
+                descriptorSet.getFileList().stream()
+                        .flatMap(
+                                f ->
+                                        f.getMessageTypeList().stream()
+                                                .map(m -> f.getPackage() + "." + m.getName()))
+                        .toList();
+        if (!messageNames.stream().anyMatch(n -> n.equals(messageFullName))) {
+            throw new RuntimeException(
+                    "Message named '"
+                            + messageFullName
+                            + "' not found in descriptor set. Available message names: "
+                            + String.join(", ", messageNames));
+        }
 
         byte[] descriptorSetBytes = descriptorSet.toByteArray();
 
-        CodeBlock.Builder initializerBuilder = CodeBlock.builder();
-        initializerBuilder.add("new byte[] {");
-        initializerBuilder.indent();
-
-        for (int i = 0; i < descriptorSetBytes.length; i++) {
-            initializerBuilder.add("$L,", descriptorSetBytes[i]);
+        var blocks = new ArrayList<CodeBlock>();
+        for (byte b : descriptorSetBytes) {
+            blocks.add(CodeBlock.of("$L", b));
         }
+        CodeBlock descriptorSetInitializer =
+                CodeBlock.builder()
+                        .add("new byte[] { ")
+                        .add(CodeBlock.join(blocks, ", "))
+                        .add(" }")
+                        .build();
 
-        initializerBuilder.unindent();
-        initializerBuilder.add("\n}");
-        CodeBlock descriptorSetInitializer = initializerBuilder.build();
-
-        FieldSpec rootMessageField =
-                FieldSpec.builder(String.class, "ROOT_MESSAGE_NAME")
-                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
-                        .initializer("$S", "." + rootMessageName)
+        FieldSpec messageFullNameField =
+                FieldSpec.builder(String.class, "sMessageFullName")
+                        .addModifiers(Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                        .initializer("$S", "." + messageFullName)
                         .build();
 
         FieldSpec descriptorSetField =
-                FieldSpec.builder(byte[].class, "FILE_DESCRIPTOR_SET")
-                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+                FieldSpec.builder(byte[].class, "sFileDescriptorSet")
+                        .addModifiers(Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
                         .initializer(descriptorSetInitializer)
+                        .build();
+
+        MethodSpec messageFullNameMethod =
+                MethodSpec.methodBuilder("getMessageFullName")
+                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+                        .returns(String.class)
+                        .addStatement("return sMessageFullName")
+                        .build();
+
+        MethodSpec descriptorSetMethod =
+                MethodSpec.methodBuilder("getFileDescriptorSet")
+                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+                        .returns(byte[].class)
+                        .addStatement("return sFileDescriptorSet")
                         .build();
 
         TypeSpec generatedClass =
                 TypeSpec.classBuilder(outputClass)
                         .addJavadoc(
-                                "Generated by $L. DO NOT EDIT",
-                                ProtoDescriptorGenerator.class.getSimpleName())
+                                "Generated by {@link $T}. DO NOT EDIT.",
+                                ProtoDescriptorGenerator.class)
                         .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
-                        .addField(rootMessageField)
+                        .addField(messageFullNameField)
                         .addField(descriptorSetField)
+                        .addMethod(messageFullNameMethod)
+                        .addMethod(descriptorSetMethod)
                         .build();
-
-        String currentYear = String.valueOf(Year.now(ZoneId.systemDefault()).getValue());
 
         JavaFile javaFile = JavaFile.builder(outputPackage, generatedClass).build();
 
-        // This is done to bypass javaFile creation of all package subdirectories
-        Files.write(
-                outputFile, javaFile.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.createDirectories(outputFile.getParent());
+        try (var writer = new OutputStreamWriter(Files.newOutputStream(outputFile), UTF_8)) {
+            javaFile.writeTo(writer);
+        }
     }
 }
