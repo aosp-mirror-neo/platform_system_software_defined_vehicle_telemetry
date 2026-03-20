@@ -1,0 +1,88 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_team: "trendy_team_automotive",
+    default_visibility: ["//visibility:private"],
+}
+
+java_defaults {
+    name: "libsdv_telemetry_sdk_configurable_publisher_registry_java_defaults",
+    sdk_version: "system_current",
+    vendor: true,
+}
+
+java_library {
+    name: "libsdv_telemetry_sdk_configurable_publisher_registry_java",
+    visibility: ["//visibility:public"],
+    defaults: ["libsdv_telemetry_sdk_configurable_publisher_registry_java_defaults"],
+    srcs: ["src/**/*.java"],
+    static_libs: [
+        // keep-sorted start
+        "androidx.annotation_annotation",
+        "androidx.core_core",
+        "google.sdv.telemetry.configurable_publisher-V2-java",
+        "libprotobuf-java-lite",
+        "telemetry_binder_accessor",
+        // keep-sorted end
+    ],
+}
+
+android_test {
+    name: "sdv_ivi_telemetry_unit_sdk_configurable_publisher_registry_java_test",
+    defaults: ["libsdv_telemetry_sdk_configurable_publisher_registry_java_defaults"],
+    srcs: [
+        // keep-sorted start
+        ":libprotobuf-internal-protos",
+        "tests/src/**/*.java",
+        // keep-sorted end
+    ],
+    manifest: "tests/AndroidManifest.xml",
+    test_config: "tests/AndroidTest.xml",
+    proto: {
+        type: "lite",
+        include_dirs: ["external/protobuf/src"],
+    },
+    static_libs: [
+        // keep-sorted start
+        "androidx.core_core",
+        "androidx.test.ext.junit",
+        "androidx.test.runner",
+        "libprotobuf-java-lite",
+        "libsdv_telemetry_sdk_configurable_publisher_registry_java",
+        "mockito-core",
+        "mockito-target-inline",
+        "truth",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    jni_libs: [
+        // keep-sorted start
+        "libbinder_accessor",
+        // Required by the `mockito-target-inline` dependency.
+        "libdexmakerjvmtiagent",
+        // keep-sorted end
+    ],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
+}

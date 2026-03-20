@@ -25,6 +25,9 @@
   "sdv_telemetry_tests_presubmit": [
     // keep-sorted start block=yes
     {
+      "name": "sdv_ivi_telemetry_unit_sdk_configurable_publisher_registry_java_test"
+    },
+    {
       "name": "sdv_mt_proto_descriptor_generator_test"
     },
     {
