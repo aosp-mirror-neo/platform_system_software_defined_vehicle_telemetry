@@ -116,7 +116,10 @@ rust_bindgen {
     name: "libsdv_telemetry_status_codes_bindgen",
     crate_name: "sdv_telemetry_status_codes_bindgen",
     wrapper_src: "export/status_codes.h",
-    cpp_std: "gnu++17",
+    // Set to the (current) default c++ version. The actual version matters
+    // less than that we should set it to something to signal bindgen that this
+    // is a c++ header.
+    cpp_std: "gnu++23",
     source_stem: "bindings",
     bindgen_flags: [
         "--default-enum-style=newtype",
