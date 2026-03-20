@@ -38,7 +38,7 @@ impl ValueAggregator for AvgAggregator {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
         let node_value = node_value.expect("Aggregator should be provided with a value");
         if node_value.is_none() {
-            return Ok(NodeValue::None);
+            return Ok(if self.n == 0 { NodeValue::None } else { self.current_avg.clone() });
         }
         self.current_avg.update_running_average(self.n, &node_value)?;
         self.n += 1;
@@ -93,8 +93,14 @@ mod tests {
     fn compute_with_none_value_ok() {
         let mut aggregator = AvgAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
-
         assert_eq!(res, NodeValue::None);
+
+        aggregator.compute(Some(4.into())).unwrap();
+        aggregator.compute(Some(6.into())).unwrap();
+
+        let res = aggregator.compute(Some(NodeValue::None)).unwrap();
+        assert_eq!(res, NodeValue::Double(5.0));
+        assert_eq!(aggregator.n, 2);
     }
 
     #[test]

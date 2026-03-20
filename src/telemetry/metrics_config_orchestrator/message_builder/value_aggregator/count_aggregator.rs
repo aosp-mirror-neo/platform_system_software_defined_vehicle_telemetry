@@ -29,7 +29,10 @@ impl CountAggregator {
 }
 
 impl ValueAggregator for CountAggregator {
-    fn compute(&mut self, _node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
+    fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
+        if node_value.is_some() {
+            panic!("Aggregator should be provided with no value")
+        }
         self.count += 1;
         Ok(NodeValue::Int32(self.count))
     }
@@ -55,6 +58,13 @@ mod tests {
             // assert
             assert_eq!(res, NodeValue::Int32(i + 1));
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn compute_with_node_value_panics() {
+        let mut aggregator = CountAggregator::new();
+        aggregator.compute(Some(NodeValue::Bool(true))).unwrap();
     }
 
     #[test]
