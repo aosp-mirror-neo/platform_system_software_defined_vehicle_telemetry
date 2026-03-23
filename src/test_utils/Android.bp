@@ -75,7 +75,12 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_test_utils",
-    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
+    visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
     defaults: ["libsdv_telemetry_test_utils_defaults"],
     crate_name: "sdv_telemetry_test_utils",
 }

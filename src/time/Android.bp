@@ -35,7 +35,6 @@ rust_bindgen {
     name: "libsdv_telemetry_time_bindgen",
     crate_name: "sdv_telemetry_time_bindgen",
     wrapper_src: "time_wrapper.h",
-    cpp_std: "gnu++17",
     source_stem: "bindings",
     shared_libs: [
         // keep-sorted start

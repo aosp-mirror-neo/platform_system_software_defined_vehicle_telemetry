@@ -21,7 +21,6 @@ import android.os.RemoteException;
 
 import androidx.annotation.VisibleForTesting;
 
-import google.sdv.telemetry.configurable_publisher.IConfigurablePublisher;
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
 import google.sdv.telemetry.java.Binder.BinderServiceAccessor;
 
@@ -48,9 +47,16 @@ public final class Registry {
         mRegistryBinder = registry;
     }
 
-    final Registration register(PublisherMetadata metadata, IConfigurablePublisher publisher)
-            throws RemoteException {
-        mRegistryBinder.registerPublisher(metadata.toAidl(), publisher);
+    /**
+     * Register a publisher with the registry.
+     *
+     * @param publisher The publisher to register
+     * @return A registration object that can be used to unregister this publisher
+     * @throws RemoteException If the registration fails
+     */
+    public final Registration register(Publisher<?, ?> publisher) throws RemoteException {
+        PublisherMetadata metadata = publisher.getMetadata();
+        mRegistryBinder.registerPublisher(metadata.toAidl(), publisher.toBinder());
         return new Registration(this, metadata.name());
     }
 

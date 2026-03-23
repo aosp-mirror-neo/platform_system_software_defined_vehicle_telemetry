@@ -24,9 +24,12 @@
   ],
   "sdv_telemetry_tests_presubmit": [
     // keep-sorted start block=yes
-    {
-      "name": "sdv_ivi_telemetry_unit_sdk_configurable_publisher_registry_java_test"
-    },
+
+    // TODO: b/495172020 - Re-enable this test once IVI tests are supported in TEST_MAPPING.
+    // {
+    //   "name": "sdv_ivi_telemetry_unit_sdk_configurable_publisher_registry_java_test"
+    // },
+
     {
       "name": "sdv_mt_proto_descriptor_generator_test"
     },
@@ -62,6 +65,9 @@
     },
     {
       "name": "sdv_mt_telemetry_unit_platform_abstraction_layer_test"
+    },
+    {
+      "name": "sdv_mt_telemetry_unit_sdk_configurable_publisher_registry_rust_test"
     },
     {
       "name": "sdv_mt_telemetry_unit_service_publisher_accessor_test"

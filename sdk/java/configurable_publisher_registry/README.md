@@ -97,6 +97,8 @@ import java.util.Optional;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
 
+// Assuming MyProtobufMessage is a protobuf message generated in your project.
+
 public class MyPublisher extends Publisher<MyProtobufMessage, Void> {
     private static final PublisherMetadata sMetadata = new PublisherMetadata(
                 new PublisherName("my_custom_publisher"),
@@ -171,7 +173,7 @@ MyPublisher myPublisher = new MyPublisher();
 try {
     // 2. Obtain the registry and register the publisher
     Registry registry = new Registry();
-    Registration registration = myPublisher.register(registry);
+    Registration registration = registry.register(myPublisher);
 
     // The publisher is now active and can be discovered by and subscribed to by
     // the Telemetry Service.

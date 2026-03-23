@@ -65,6 +65,7 @@ rust_binary {
         "comms_stack",
         "platform_abstraction_layer_core",
     ],
+    required: ["com.google.sdv.telemetry"],
     rustlibs: [
         // keep-sorted start
         "libfutures",
