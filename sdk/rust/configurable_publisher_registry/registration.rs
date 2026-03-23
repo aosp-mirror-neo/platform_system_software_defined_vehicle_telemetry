@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module implements an SDK for the Configurable Publisher Registry service
+use crate::PublisherName;
 
-/// Introduces Configurable Publisher trait that will be implemented by the client
-pub mod configurable_publisher;
+/// Publisher registration
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Registration {
+    pub(crate) name: PublisherName,
+}
 
-/// Contains functions that allows client to register and unregister configurable publishers
-pub mod configurable_publisher_registry;
-
-/// Contains traits that manage configurable publisher subscriptions
-pub mod configurable_publisher_subscription;
-
-/// Contains struct that stores information about the publisher being passed
-pub mod publisher_info;
-
-/// Contains Subscriber trait
-pub mod subscriber;
+impl Registration {
+    /// Create a new Registration
+    pub(crate) fn new(name: PublisherName) -> Self {
+        Self { name }
+    }
+}

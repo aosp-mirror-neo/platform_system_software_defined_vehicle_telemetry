@@ -19,7 +19,7 @@ package {
 }
 
 rust_defaults {
-    name: "libsdv_configurable_publisher_rust_wrapper_defaults",
+    name: "libsdv_telemetry_sdk_configurable_publisher_registry_rust_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["lib.rs"],
     rustlibs: [
@@ -29,10 +29,12 @@ rust_defaults {
         "libfutures",
         "liblog_rust",
         "liblogger",
+        "libparking_lot",
         "libprotobuf",
         "libsdv_telemetry_configurable_publisher",
         "libthiserror",
         "libtokio",
+        "libtokio_util",
         // keep-sorted end
     ],
     proc_macros: [
@@ -44,9 +46,32 @@ rust_defaults {
 }
 
 rust_library {
-    name: "libsdv_configurable_publisher_rust_wrapper",
+    name: "libsdv_telemetry_sdk_configurable_publisher_registry_rust",
     visibility: ["//visibility:public"],
-    defaults: ["libsdv_configurable_publisher_rust_wrapper_defaults"],
-    crate_name: "sdv_configurable_publisher_rust_wrapper",
+    defaults: ["libsdv_telemetry_sdk_configurable_publisher_registry_rust_defaults"],
+    crate_name: "sdv_telemetry_sdk_configurable_publisher_registry",
     vendor_available: true,
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_unit_sdk_configurable_publisher_registry_rust_test",
+    defaults: ["libsdv_telemetry_sdk_configurable_publisher_registry_rust_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "libmockall",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    require_root: true,
 }

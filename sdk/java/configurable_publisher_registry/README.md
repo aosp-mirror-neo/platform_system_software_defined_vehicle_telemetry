@@ -97,6 +97,8 @@ import java.util.Optional;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
 
+// Assuming MyProtobufMessage is a protobuf message generated in your project.
+
 public class MyPublisher extends Publisher<MyProtobufMessage, Void> {
     private static final PublisherMetadata sMetadata = new PublisherMetadata(
                 new PublisherName("my_custom_publisher"),
