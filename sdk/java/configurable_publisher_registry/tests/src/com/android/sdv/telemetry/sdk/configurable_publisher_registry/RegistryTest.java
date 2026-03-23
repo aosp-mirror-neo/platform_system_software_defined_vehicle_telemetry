@@ -17,7 +17,9 @@ package com.android.sdv.telemetry.sdk.configurable_publisher_registry;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.refEq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
@@ -52,8 +54,11 @@ public class RegistryTest {
         PublisherMetadata metadata =
                 new PublisherMetadata(
                         new PublisherName("testService"), new byte[0], "message", true);
+        var publisher = mock(Publisher.class);
+        when(publisher.getMetadata()).thenReturn(metadata);
+        when(publisher.toBinder()).thenReturn(mMockPublisher);
 
-        try (Registration registration = mRegistry.register(metadata, mMockPublisher)) {
+        try (Registration registration = mRegistry.register(publisher)) {
             verify(mMockIConfigurablePublisherRegistry)
                     .registerPublisher(refEq(metadata.toAidl()), eq(mMockPublisher));
         }

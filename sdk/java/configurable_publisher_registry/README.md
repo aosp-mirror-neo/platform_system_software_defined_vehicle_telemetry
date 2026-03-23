@@ -171,7 +171,7 @@ MyPublisher myPublisher = new MyPublisher();
 try {
     // 2. Obtain the registry and register the publisher
     Registry registry = new Registry();
-    Registration registration = myPublisher.register(registry);
+    Registration registration = registry.register(myPublisher);
 
     // The publisher is now active and can be discovered by and subscribed to by
     // the Telemetry Service.

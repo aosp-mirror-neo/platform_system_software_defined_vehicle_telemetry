@@ -178,7 +178,7 @@ public class PublisherTest {
     public void register_validPublisher_registersAndUnregistersWithRegistry() throws Exception {
         TestPublisher publisher = new TestPublisher(sMetadata);
 
-        try (Registration registration = publisher.register(mRegistry)) {
+        try (Registration registration = mRegistry.register(publisher)) {
             verify(mMockIConfigurablePublisherRegistry)
                     .registerPublisher(refEq(sMetadata.toAidl()), any());
         }
@@ -189,7 +189,7 @@ public class PublisherTest {
     public void register_validPublisher_createSubscription() throws Exception {
         TestPublisher publisher = new TestPublisher(sMetadata);
 
-        try (Registration registration = publisher.register(mRegistry)) {
+        try (Registration registration = mRegistry.register(publisher)) {
             // Capture the `IConfigurablePublisher` instance that would be passed through Binder to
             // Telemetry.
             ArgumentCaptor<IConfigurablePublisher> captor =
@@ -234,7 +234,7 @@ public class PublisherTest {
     public void register_validPublisher_getLatestMessage() throws Exception {
         TestPublisher publisher = new TestPublisher(sMetadata);
 
-        try (Registration registration = publisher.register(mRegistry)) {
+        try (Registration registration = mRegistry.register(publisher)) {
             // Capture the `IConfigurablePublisher` instance that would be passed through Binder to
             // Telemetry.
             ArgumentCaptor<IConfigurablePublisher> captor =

@@ -85,17 +85,6 @@ public abstract class Publisher<T, U> {
     }
 
     /**
-     * Register this publisher with the registry.
-     *
-     * @param registry The registry to register with
-     * @return A registration object that can be used to unregister this publisher
-     * @throws RemoteException If the registration fails
-     */
-    public final Registration register(Registry registry) throws RemoteException {
-        return registry.register(mMetadata, toBinder());
-    }
-
-    /**
      * Subscribe to messages.
      *
      * <p>Never publishes any messages if not overwritten.
@@ -130,7 +119,11 @@ public abstract class Publisher<T, U> {
         return Optional.empty();
     }
 
-    private final IConfigurablePublisher toBinder() {
+    final PublisherMetadata getMetadata() {
+        return mMetadata;
+    }
+
+    final IConfigurablePublisher toBinder() {
         return new PublisherBinder() {
             @Override
             public IConfigurablePublisherSubscription createSubscription(
