@@ -90,12 +90,15 @@ impl Publisher for AggregationPublisher {
         self: Arc<Self>,
     ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>
     {
-        let latest_message = self.base.get_latest_message();
+        let latest_message = match self.base.get_latest_message() {
+            Some(latest_message) => latest_message,
+            None => self.message_builder.build_default().into(),
+        };
         if self.reset_on_get {
             self.base.reset_latest_message();
             self.message_builder.reset();
         }
-        Ok(latest_message).into()
+        Ok(Some(latest_message)).into()
     }
 
     async fn activate(self: Arc<Self>) {
@@ -434,6 +437,17 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn get_latest_message_returns_default_when_none() {
+        let (publisher, message_builder) = create_active_aggregation_publisher(vec![]).await;
+
+        let result = Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap();
+
+        assert!(result.is_some(), "Expected a default message, but got None");
+        assert_eq!(message_builder.get_num_build_default_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     async fn get_latest_message_resets() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
@@ -460,13 +474,16 @@ mod tests {
             .get_latest_message()
             .unwrap_sync()
             .expect("Message retrieval should be successful");
+
         let msg2 = publisher
             .get_latest_message()
             .unwrap_sync()
             .expect("Message retrieval should be successful");
 
-        assert!(msg1.is_some());
-        assert!(msg2.is_none(), "Unexpected message: {:?}", msg2.unwrap());
+        assert!(msg1.is_some(), "Expected a message, but got None");
+        assert!(msg2.is_some(), "Expected a message, but got None");
+        assert_eq!(message_builder.get_num_build_calls(), 1);
+        assert_eq!(message_builder.get_num_build_default_calls(), 1);
         assert_eq!(message_builder.get_num_reset_calls(), 2);
     }
 

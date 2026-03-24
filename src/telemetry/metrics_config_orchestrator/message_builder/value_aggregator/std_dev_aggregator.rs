@@ -64,6 +64,10 @@ impl ValueAggregator for StdDevAggregator {
         self.current_std_dev = DEFAULT_DOUBLE_VALUE;
         self.n = 0;
     }
+
+    fn default_value(&self) -> NodeValue {
+        NodeValue::None
+    }
 }
 
 impl StdDevAggregator {
@@ -199,5 +203,11 @@ mod tests {
         assert_eq!(aggregator.current_avg, DEFAULT_DOUBLE_VALUE);
         assert_eq!(aggregator.current_std_dev, DEFAULT_DOUBLE_VALUE);
         assert_eq!(aggregator.n, 0);
+    }
+
+    #[test]
+    fn default_value_none() {
+        let default_value = StdDevAggregator::new().default_value();
+        assert_eq!(default_value, NodeValue::None);
     }
 }

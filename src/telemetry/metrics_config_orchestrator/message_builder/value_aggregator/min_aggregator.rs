@@ -59,6 +59,10 @@ impl ValueAggregator for MinAggregator {
     fn reset(&mut self) {
         self.current_min = None;
     }
+
+    fn default_value(&self) -> NodeValue {
+        NodeValue::None
+    }
 }
 
 #[cfg(test)]
@@ -130,5 +134,11 @@ mod tests {
         aggregator.reset();
 
         assert_eq!(aggregator.current_min, None);
+    }
+
+    #[test]
+    fn default_value_none() {
+        let default_value = MinAggregator::new().default_value();
+        assert_eq!(default_value, NodeValue::None);
     }
 }

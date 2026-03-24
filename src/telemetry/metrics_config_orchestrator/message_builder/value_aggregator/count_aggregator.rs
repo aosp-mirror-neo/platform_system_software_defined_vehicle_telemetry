@@ -37,6 +37,10 @@ impl ValueAggregator for CountAggregator {
     fn reset(&mut self) {
         self.count = 0;
     }
+
+    fn default_value(&self) -> NodeValue {
+        NodeValue::Int32(0)
+    }
 }
 
 #[cfg(test)]
@@ -65,5 +69,11 @@ mod tests {
         aggregator.reset();
 
         assert_eq!(aggregator.count, 0);
+    }
+
+    #[test]
+    fn default_value_zero() {
+        let default_value = CountAggregator::new().default_value();
+        assert_eq!(default_value, NodeValue::Int32(0));
     }
 }
