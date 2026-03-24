@@ -33,7 +33,9 @@ rust_binary {
         "libtokio",
         // keep-sorted end
     ],
-    vendor_available: true,
+    system_ext_specific: true,
+    vendor_available: false,
+    product_available: false,
     compile_multilib: "both",
     installable: false,
 }

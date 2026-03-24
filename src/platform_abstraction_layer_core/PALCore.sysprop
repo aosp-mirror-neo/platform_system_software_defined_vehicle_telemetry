@@ -1,4 +1,4 @@
-owner: Vendor
+owner: Platform
 module: "com.sdv.google.foo"
 
 prop {
@@ -6,5 +6,5 @@ prop {
     type: Long
     access: ReadWrite
     scope: Internal
-    prop_name: "vendor.sdv.telemetry.resumed_at_timestamp"
+    prop_name: "sdv.telemetry.resumed_at_timestamp"
 }
