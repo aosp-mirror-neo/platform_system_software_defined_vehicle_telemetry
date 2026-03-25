@@ -26,7 +26,7 @@ filegroup {
 
 cc_library {
     name: "libsdv_telemetry_proto_cpp",
-    visibility: ["//system/software_defined_vehicle/telemetry/clientlib:__subpackages__"],
+    visibility: ["//system/software_defined_vehicle/telemetry/sdk/rust/client/internal:__subpackages__"],
     defaults: [
         "sdv_telemetry@cc_defaults",
     ],

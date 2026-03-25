@@ -564,7 +564,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run SDV Telemetry end-to-end tests."
     )
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="sub_command")
+    subparsers.required = True
 
     # "run" subcommand
     parser_run = subparsers.add_parser("run", help="running tests")
@@ -620,7 +621,7 @@ def main() -> None:
     is_ivi = "_ivi_" in target_product
 
     args = parse_args()
-    if args.command == "run":
+    if args.sub_command == "run":
         if args.test_names:
             test_names: List[str] = args.test_names
         else:
@@ -636,7 +637,7 @@ def main() -> None:
             is_ivi=is_ivi,
         )
         return
-    elif args.command == "list":
+    elif args.sub_command == "list":
         test_names = get_all_test_names(sdv_catbox_config_dir)
         for test_name in test_names:
             print(test_name)

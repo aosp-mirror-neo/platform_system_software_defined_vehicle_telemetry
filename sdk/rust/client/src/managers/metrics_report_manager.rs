@@ -22,8 +22,8 @@ use crate::{
 };
 
 use log::info;
-use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
+use sdv_telemetry_sdk_client_internal as rust_to_c;
 use std::ffi::{c_void, CStr, CString};
 
 /// Callback that handles report ready event.

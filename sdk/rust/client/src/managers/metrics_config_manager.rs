@@ -16,7 +16,7 @@ use crate::callbacks::{call_api_with_config_list_callback, call_api_with_status_
 use crate::TelemetryResult;
 use crate::TelemetryServiceHolder;
 
-use sdv_telemetry_bindgen as rust_to_c;
+use sdv_telemetry_sdk_client_internal as rust_to_c;
 use std::ffi::CString;
 
 pub async fn add_metrics_config(

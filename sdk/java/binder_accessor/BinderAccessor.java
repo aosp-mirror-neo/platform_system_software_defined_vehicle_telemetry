@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package google.sdv.telemetry.java.Binder;
+package com.android.sdv.telemetry.sdk.binder_accessor;
 
 import android.os.IBinder;
 
-/** JavaBinderServiceAccessor */
-public class BinderServiceAccessor {
-    public static native IBinder getService(String name);
+public final class BinderAccessor {
+    public static final native IBinder getService(String name);
 }

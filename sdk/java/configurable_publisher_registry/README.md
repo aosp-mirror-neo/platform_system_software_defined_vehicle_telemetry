@@ -50,7 +50,7 @@ java_<library|binary> {
     ],
     jni_libs: [
         // ...
-        "libbinder_accessor",
+        "libsdv_telemetry_sdk_binder_accessor_java_jni",
         // ...
     ],
 }

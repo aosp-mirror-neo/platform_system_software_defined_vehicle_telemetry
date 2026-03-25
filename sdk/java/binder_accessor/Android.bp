@@ -19,33 +19,23 @@ package {
 }
 
 cc_library {
-    name: "libbinder_accessor",
-    visibility: [
-        // keep-sorted start
-        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
-        "//system/software_defined_vehicle/telemetry:__subpackages__",
-        // keep-sorted end
-    ],
-    srcs: ["binder_access.cpp"],
+    name: "libsdv_telemetry_sdk_binder_accessor_java_jni",
+    visibility: ["//visibility:public"],
+    srcs: ["binder_accessor.cpp"],
     vendor_available: true,
     shared_libs: [
-        "liblog",
+        // keep-sorted start
         "libbinder_ndk",
+        "liblog",
+        // keep-sorted end
     ],
     header_libs: ["jni_headers"],
     stl: "c++_shared",
 }
 
 java_library {
-    name: "telemetry_binder_accessor",
-    visibility: [
-        // keep-sorted start
-        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
-        "//system/software_defined_vehicle/telemetry:__subpackages__",
-        // keep-sorted end
-    ],
-    srcs: [
-        "BinderServiceAccessor.java",
-    ],
+    name: "libsdv_telemetry_sdk_binder_accessor_java",
+    visibility: ["//visibility:public"],
+    srcs: ["BinderAccessor.java"],
     sdk_version: "system_current",
 }

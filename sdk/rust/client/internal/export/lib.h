@@ -367,4 +367,4 @@ int32_t clear_misc_status_listener(ServiceHolder* holder, void** outPreviousStat
 }
 #endif
 
-#endif // TELEMETRY_CLIENTLIB_INCLUDE_LIB_H
+#endif  // TELEMETRY_CLIENTLIB_INCLUDE_LIB_H
