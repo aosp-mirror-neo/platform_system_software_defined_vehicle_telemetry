@@ -18,22 +18,22 @@ mod callbacks;
 mod managers;
 mod status;
 
-pub use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
+pub use sdv_telemetry_sdk_client_internal_status_codes::TelemetryServiceStatusCodes;
 pub use status::{
     AggregationPublisherErrorDetails, ConditionalTriggerErrorDetails, FileIOErrorDetails,
     MetricsReportGeneratorErrorDetails, ServiceErrorDetails, ServicePublisherErrorDetails,
     StatusDetails, TelemetryServiceStatus,
 };
 
-use crate::rust_to_c::ServiceHolder;
-use callbacks::call_api_with_status_callback;
 use log::info;
-use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
+use sdv_telemetry_sdk_client_internal as rust_to_c;
+use sdv_telemetry_sdk_client_internal::ServiceHolder;
 use std::ffi::{c_void, CStr};
 
-use managers::metrics_config_manager;
-use managers::metrics_report_manager;
+use crate::callbacks::call_api_with_status_callback;
+use crate::managers::metrics_config_manager;
+use crate::managers::metrics_report_manager;
 
 /// Represents an error with an error code and error message. The messages are not guaranteed to be
 /// stable and may change or be removed at any point.
@@ -104,7 +104,7 @@ impl<T: Send + Sync> SendSyncPtr<T> {
 }
 
 fn get_aggregation_publisher_error_details(
-    details: sdv_telemetry_bindgen::AggregationPublisherErrorDetails,
+    details: rust_to_c::AggregationPublisherErrorDetails,
 ) -> status::StatusDetails {
     StatusDetails::AggregationPublisherErrorDetails(AggregationPublisherErrorDetails {
         // SAFETY: AggregationPublisherErrorDetails holds a pointer to metrics_config_uuid
@@ -126,7 +126,7 @@ fn get_aggregation_publisher_error_details(
 }
 
 fn get_service_publisher_error_details(
-    details: sdv_telemetry_bindgen::ServicePublisherErrorDetails,
+    details: rust_to_c::ServicePublisherErrorDetails,
 ) -> status::StatusDetails {
     StatusDetails::ServicePublisherErrorDetails(ServicePublisherErrorDetails {
         // SAFETY: ServicePublisherErrorDetails holds a pointer to metrics_config_uuid
@@ -145,7 +145,7 @@ fn get_service_publisher_error_details(
 }
 
 fn get_conditional_trigger_error_details(
-    details: sdv_telemetry_bindgen::ConditionalTriggerErrorDetails,
+    details: rust_to_c::ConditionalTriggerErrorDetails,
 ) -> status::StatusDetails {
     StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
         // SAFETY: ConditionalTriggerErrorDetails holds a pointer to metrics_config_uuid
@@ -161,7 +161,7 @@ fn get_conditional_trigger_error_details(
 }
 
 fn get_metrics_report_generator_error_details(
-    details: sdv_telemetry_bindgen::MetricsReportGeneratorErrorDetails,
+    details: rust_to_c::MetricsReportGeneratorErrorDetails,
 ) -> status::StatusDetails {
     StatusDetails::MetricsReportGeneratorErrorDetails(MetricsReportGeneratorErrorDetails {
         // SAFETY: MetricsReportGeneratorErrorDetails holds a pointer to metrics_config_uuid
@@ -182,9 +182,7 @@ fn get_metrics_report_generator_error_details(
     })
 }
 
-fn get_service_error_details(
-    details: sdv_telemetry_bindgen::ServiceErrorDetails,
-) -> status::StatusDetails {
+fn get_service_error_details(details: rust_to_c::ServiceErrorDetails) -> status::StatusDetails {
     StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
         // SAFETY: ServiceErrorDetails holds a pointer to service_name
         // that satisfies`CStr::from_ptr` safety requirements.
@@ -192,9 +190,7 @@ fn get_service_error_details(
     })
 }
 
-fn get_file_io_error_details(
-    details: sdv_telemetry_bindgen::FileIOErrorDetails,
-) -> status::StatusDetails {
+fn get_file_io_error_details(details: rust_to_c::FileIOErrorDetails) -> status::StatusDetails {
     StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
         // SAFETY: FileIOErrorDetails holds a pointer to path
         // that satisfies`CStr::from_ptr` safety requirements.
@@ -203,44 +199,44 @@ fn get_file_io_error_details(
 }
 
 fn get_status_details(
-    details_with_tag: *const sdv_telemetry_bindgen::StatusDetailsWithTag,
+    details_with_tag: *const rust_to_c::StatusDetailsWithTag,
 ) -> Option<status::StatusDetails> {
     // SAFETY: The caller has provided a valid pointer to `StatusDetailsWithTag`
     let details_with_tag = unsafe { *details_with_tag };
 
     match details_with_tag.tag {
-        sdv_telemetry_bindgen::StatusDetailsTag_AggregationPublisherErrorDetailsTag => {
+        rust_to_c::StatusDetailsTag_AggregationPublisherErrorDetailsTag => {
             // SAFETY: The caller has provided a valid tag to access details union field
             let details = unsafe { details_with_tag.details.aggregation_publisher_error_details };
             Some(get_aggregation_publisher_error_details(details))
         }
 
-        sdv_telemetry_bindgen::StatusDetailsTag_ServicePublisherErrorDetailsTag => {
+        rust_to_c::StatusDetailsTag_ServicePublisherErrorDetailsTag => {
             // SAFETY: The caller has provided a valid tag to access details union field
             let details = unsafe { details_with_tag.details.service_publisher_error_details };
             Some(get_service_publisher_error_details(details))
         }
 
-        sdv_telemetry_bindgen::StatusDetailsTag_ConditionalTriggerErrorDetailsTag => {
+        rust_to_c::StatusDetailsTag_ConditionalTriggerErrorDetailsTag => {
             // SAFETY: The caller has provided a valid tag to access details union field
             let details = unsafe { details_with_tag.details.conditional_trigger_error_details };
             Some(get_conditional_trigger_error_details(details))
         }
 
-        sdv_telemetry_bindgen::StatusDetailsTag_MetricsReportGeneratorErrorDetailsTag => {
+        rust_to_c::StatusDetailsTag_MetricsReportGeneratorErrorDetailsTag => {
             // SAFETY: The caller has provided a valid tag to access details union field
             let details =
                 unsafe { details_with_tag.details.metrics_report_generator_error_details };
             Some(get_metrics_report_generator_error_details(details))
         }
 
-        sdv_telemetry_bindgen::StatusDetailsTag_ServiceErrorDetailsTag => {
+        rust_to_c::StatusDetailsTag_ServiceErrorDetailsTag => {
             // SAFETY: The caller has provided a valid tag to access details union field
             let details = unsafe { details_with_tag.details.service_error_details };
             Some(get_service_error_details(details))
         }
 
-        sdv_telemetry_bindgen::StatusDetailsTag_FileIOErrorDetailsTag => {
+        rust_to_c::StatusDetailsTag_FileIOErrorDetailsTag => {
             // SAFETY: The caller has provided a valid tag to access details union field
             let details = unsafe { details_with_tag.details.file_io_error_details };
             Some(get_file_io_error_details(details))
@@ -258,7 +254,7 @@ fn get_status_details(
 /// * `status` points to a valid `TelemetryServiceStatus` instance.
 unsafe extern "C" fn on_misc_status(
     listener: *mut std::ffi::c_void,
-    status: *const sdv_telemetry_bindgen::TelemetryServiceStatus,
+    status: *const rust_to_c::TelemetryServiceStatus,
 ) {
     // SAFETY: The caller sends back the reference to `StatusListener` that was originally sent to
     // the caller as part of the `set_misc_status_listener` API call.
@@ -615,16 +611,14 @@ mod test {
         let uuid = CString::new(UUID).unwrap();
         let publisher_name = CString::new(PUBLISHER_NAME).unwrap();
         let field_name = CString::new(FIELD_NAME).unwrap();
-        let details = sdv_telemetry_bindgen::AggregationPublisherErrorDetails {
+        let details = rust_to_c::AggregationPublisherErrorDetails {
             metrics_config_uuid: uuid.as_ptr(),
             publisher_name: publisher_name.as_ptr(),
             field_name: field_name.as_ptr(),
         };
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_AggregationPublisherErrorDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails {
-                aggregation_publisher_error_details: details,
-            },
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_AggregationPublisherErrorDetailsTag,
+            details: rust_to_c::StatusDetails { aggregation_publisher_error_details: details },
         };
 
         let result = get_status_details(&details_with_tag);
@@ -642,15 +636,13 @@ mod test {
     fn test_get_status_details_service_publisher_error() {
         let uuid = CString::new(UUID).unwrap();
         let publisher_name = CString::new(PUBLISHER_NAME).unwrap();
-        let details = sdv_telemetry_bindgen::ServicePublisherErrorDetails {
+        let details = rust_to_c::ServicePublisherErrorDetails {
             metrics_config_uuid: uuid.as_ptr(),
             publisher_name: publisher_name.as_ptr(),
         };
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_ServicePublisherErrorDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails {
-                service_publisher_error_details: details,
-            },
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_ServicePublisherErrorDetailsTag,
+            details: rust_to_c::StatusDetails { service_publisher_error_details: details },
         };
 
         let result = get_status_details(&details_with_tag);
@@ -667,15 +659,13 @@ mod test {
     fn test_get_status_details_conditional_trigger_error() {
         let uuid = CString::new(UUID).unwrap();
         let trigger_name = CString::new(TRIGGER_NAME).unwrap();
-        let details = sdv_telemetry_bindgen::ConditionalTriggerErrorDetails {
+        let details = rust_to_c::ConditionalTriggerErrorDetails {
             metrics_config_uuid: uuid.as_ptr(),
             trigger_name: trigger_name.as_ptr(),
         };
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_ConditionalTriggerErrorDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails {
-                conditional_trigger_error_details: details,
-            },
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_ConditionalTriggerErrorDetailsTag,
+            details: rust_to_c::StatusDetails { conditional_trigger_error_details: details },
         };
 
         let result = get_status_details(&details_with_tag);
@@ -693,16 +683,14 @@ mod test {
         let uuid = CString::new(UUID).unwrap();
         let report_name = CString::new(REPORT_NAME).unwrap();
         let field_name = CString::new(FIELD_NAME).unwrap();
-        let details = sdv_telemetry_bindgen::MetricsReportGeneratorErrorDetails {
+        let details = rust_to_c::MetricsReportGeneratorErrorDetails {
             metrics_config_uuid: uuid.as_ptr(),
             metrics_report_name: report_name.as_ptr(),
             field_name: field_name.as_ptr(),
         };
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_MetricsReportGeneratorErrorDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails {
-                metrics_report_generator_error_details: details,
-            },
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_MetricsReportGeneratorErrorDetailsTag,
+            details: rust_to_c::StatusDetails { metrics_report_generator_error_details: details },
         };
 
         let result = get_status_details(&details_with_tag);
@@ -719,11 +707,10 @@ mod test {
     #[test]
     fn test_get_status_details_service_error() {
         let service_name = CString::new(SERVICE_NAME).unwrap();
-        let details =
-            sdv_telemetry_bindgen::ServiceErrorDetails { service_name: service_name.as_ptr() };
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_ServiceErrorDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails { service_error_details: details },
+        let details = rust_to_c::ServiceErrorDetails { service_name: service_name.as_ptr() };
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_ServiceErrorDetailsTag,
+            details: rust_to_c::StatusDetails { service_error_details: details },
         };
 
         let result = get_status_details(&details_with_tag);
@@ -739,10 +726,10 @@ mod test {
     #[test]
     fn test_get_status_details_file_io_error() {
         let path = CString::new(PATH).unwrap();
-        let details = sdv_telemetry_bindgen::FileIOErrorDetails { path: path.as_ptr() };
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_FileIOErrorDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails { file_io_error_details: details },
+        let details = rust_to_c::FileIOErrorDetails { path: path.as_ptr() };
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_FileIOErrorDetailsTag,
+            details: rust_to_c::StatusDetails { file_io_error_details: details },
         };
 
         let result = get_status_details(&details_with_tag);
@@ -757,11 +744,9 @@ mod test {
 
     #[test]
     fn test_get_status_details_unknown_tag() {
-        let details_with_tag = sdv_telemetry_bindgen::StatusDetailsWithTag {
-            tag: sdv_telemetry_bindgen::StatusDetailsTag_UnknownDetailsTag,
-            details: sdv_telemetry_bindgen::StatusDetails {
-                unknown_details: sdv_telemetry_bindgen::UnknownDetails {},
-            },
+        let details_with_tag = rust_to_c::StatusDetailsWithTag {
+            tag: rust_to_c::StatusDetailsTag_UnknownDetailsTag,
+            details: rust_to_c::StatusDetails { unknown_details: rust_to_c::UnknownDetails {} },
         };
 
         let result = get_status_details(&details_with_tag);

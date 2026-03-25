@@ -14,7 +14,7 @@
 
 use log::{error, info};
 use protobuf::Message;
-use sdv_telemetry_bindgen as rust_to_c;
+use sdv_telemetry_sdk_client_internal as rust_to_c;
 use std::ffi::{c_char, c_void, CStr};
 use std::slice;
 use tokio::sync::oneshot;

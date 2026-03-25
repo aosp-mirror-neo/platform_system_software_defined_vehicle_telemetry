@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
+use sdv_telemetry_sdk_client_internal_status_codes::TelemetryServiceStatusCodes;
 
 /// Aggregation Publisher error details
 #[derive(Debug)]

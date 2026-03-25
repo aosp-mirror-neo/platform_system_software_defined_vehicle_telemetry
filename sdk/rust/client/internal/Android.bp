@@ -12,14 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package {
-    default_team: "trendy_team_connectivity_telemetry",
-    default_applicable_licenses: ["Android-Apache-2.0"],
-    default_visibility: ["//visibility:private"],
-}
-
 cc_defaults {
-    name: "libtelemetry_c_defaults",
+    name: "libsdv_telemetry_sdk_client_internal_cc_defaults",
     defaults: [
         "sdv_telemetry@cc_defaults",
     ],
@@ -39,9 +33,9 @@ cc_defaults {
 }
 
 cc_library {
-    name: "libtelemetry_c",
+    name: "libsdv_telemetry_sdk_client_internal_cc",
     defaults: [
-        "libtelemetry_c_defaults",
+        "libsdv_telemetry_sdk_client_internal_cc_defaults",
     ],
     srcs: [
         // keep-sorted start
@@ -72,13 +66,14 @@ cc_library {
 }
 
 rust_bindgen {
-    name: "libsdv_telemetry_bindgen",
-    crate_name: "sdv_telemetry_bindgen",
+    name: "libsdv_telemetry_sdk_client_internal_rust_bindgen",
+    visibility: ["//system/software_defined_vehicle/telemetry/sdk/rust/client"],
+    crate_name: "sdv_telemetry_sdk_client_internal",
     wrapper_src: "export/lib.h",
     source_stem: "bindings",
     shared_libs: [
         // keep-sorted start
-        "libtelemetry_c",
+        "libsdv_telemetry_sdk_client_internal_cc",
         // keep-sorted end
     ],
     product_available: true,
@@ -86,11 +81,11 @@ rust_bindgen {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_clientlib_bindgen_test",
+    name: "sdv_mt_telemetry_unit_sdk_client_internal_rust_bindgen_test",
     defaults: ["sdv_telemetry@rust_defaults"],
-    crate_name: "sdv_telemetry_bindgen_tests",
+    crate_name: "sdv_telemetry_sdk_client_internal_tests",
     srcs: [
-        ":libsdv_telemetry_bindgen",
+        ":libsdv_telemetry_sdk_client_internal_rust_bindgen",
     ],
     test_options: {
         unit_test: true,
@@ -113,13 +108,10 @@ rust_test {
 }
 
 rust_bindgen {
-    name: "libsdv_telemetry_status_codes_bindgen",
-    crate_name: "sdv_telemetry_status_codes_bindgen",
-    wrapper_src: "export/status_codes.h",
-    // Set to the (current) default c++ version. The actual version matters
-    // less than that we should set it to something to signal bindgen that this
-    // is a c++ header.
-    cpp_std: "gnu++23",
+    name: "libsdv_telemetry_sdk_client_internal_status_codes_rust_bindgen",
+    visibility: ["//system/software_defined_vehicle/telemetry/sdk/rust/client"],
+    crate_name: "sdv_telemetry_sdk_client_internal_status_codes",
+    wrapper_src: "export/status_codes.hpp",
     source_stem: "bindings",
     bindgen_flags: [
         "--default-enum-style=newtype",
@@ -129,11 +121,11 @@ rust_bindgen {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_clientlib_status_codes_bindgen_test",
+    name: "sdv_mt_telemetry_unit_sdk_client_internal_status_codes_rust_bindgen_test",
     defaults: ["sdv_telemetry@rust_defaults"],
-    crate_name: "sdv_telemetry_status_codes_bindgen_tests",
+    crate_name: "sdv_telemetry_sdk_client_internal_status_codes_tests",
     srcs: [
-        ":libsdv_telemetry_status_codes_bindgen",
+        ":libsdv_telemetry_sdk_client_internal_status_codes_rust_bindgen",
     ],
     test_options: {
         unit_test: true,
@@ -150,67 +142,6 @@ rust_test {
     // lint-free.
     clippy_lints: "none",
     lints: "none",
-    // Requires root so the test can create required directories in
-    // /data/local/tests/
-    require_root: true,
-}
-
-rust_defaults {
-    name: "libsdv_telemetry_rust_wrapper_defaults",
-    defaults: ["sdv_telemetry@rust_defaults"],
-    srcs: ["rust_wrapper/telemetry_service_rust_wrapper.rs"],
-    rustlibs: [
-        // keep-sorted start
-        "libbinder_rs",
-        "libfutures",
-        "liblog_rust",
-        "liblogger",
-        "libprotobuf",
-        "libsdv_telemetry_bindgen",
-        "libsdv_telemetry_proto_rust",
-        "libsdv_telemetry_status_codes_bindgen",
-        "libthiserror",
-        "libtokio",
-        // keep-sorted end
-    ],
-    proc_macros: [
-        // keep-sorted start
-        "libasync_trait",
-        "libclap_derive",
-        // keep-sorted end
-    ],
-}
-
-rust_library {
-    name: "libsdv_telemetry_rust_wrapper",
-    visibility: ["//visibility:public"],
-    defaults: ["libsdv_telemetry_rust_wrapper_defaults"],
-    crate_name: "sdv_telemetry_rust_wrapper",
-    product_available: true,
-    vendor_available: true,
-}
-
-rust_test {
-    name: "sdv_mt_telemetry_unit_clientlib_rust_wrapper_test",
-    defaults: ["libsdv_telemetry_rust_wrapper_defaults"],
-    crate_name: "sdv_telemetry_rust_wrapper_tests",
-    test_options: {
-        unit_test: true,
-    },
-    rustlibs: [
-        // keep-sorted start
-        "libgoogletest_rust",
-        "libsdv_telemetry_test_utils",
-        // keep-sorted end
-    ],
-    test_suites: [
-        // keep-sorted start
-        "automotive-sdv-tests",
-        "general-tests",
-        // keep-sorted end
-    ],
-    auto_gen_config: true,
-
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,

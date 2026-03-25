@@ -37,15 +37,6 @@
       "name": "sdv_mt_telemetry_lib_unit_test"
     },
     {
-      "name": "sdv_mt_telemetry_unit_clientlib_bindgen_test"
-    },
-    {
-      "name": "sdv_mt_telemetry_unit_clientlib_rust_wrapper_test"
-    },
-    {
-      "name": "sdv_mt_telemetry_unit_clientlib_status_codes_bindgen_test"
-    },
-    {
       "name": "sdv_mt_telemetry_unit_comms_stack_wrapper_test"
     },
     {
@@ -65,6 +56,15 @@
     },
     {
       "name": "sdv_mt_telemetry_unit_platform_abstraction_layer_test"
+    },
+    {
+      "name": "sdv_mt_telemetry_unit_sdk_client_internal_rust_bindgen_test"
+    },
+    {
+      "name": "sdv_mt_telemetry_unit_sdk_client_internal_status_codes_rust_bindgen_test"
+    },
+    {
+      "name": "sdv_mt_telemetry_unit_sdk_client_rust_test"
     },
     {
       "name": "sdv_mt_telemetry_unit_sdk_configurable_publisher_registry_rust_test"
