@@ -35,7 +35,7 @@ java_library {
         "androidx.core_core",
         "google.sdv.telemetry.configurable_publisher-V2-java",
         "libprotobuf-java-lite",
-        "telemetry_binder_accessor",
+        "libsdv_telemetry_sdk_binder_accessor_java",
         // keep-sorted end
     ],
 }
@@ -78,9 +78,9 @@ android_test {
     ],
     jni_libs: [
         // keep-sorted start
-        "libbinder_accessor",
         // Required by the `mockito-target-inline` dependency.
         "libdexmakerjvmtiagent",
+        "libsdv_telemetry_sdk_binder_accessor_java_jni",
         // keep-sorted end
     ],
     use_embedded_native_libs: true,
