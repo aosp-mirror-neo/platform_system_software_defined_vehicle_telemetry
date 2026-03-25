@@ -19,5 +19,6 @@
 This folder contains Rust implementations of Telemetry SDKs. Currently, we
 provide the following SDKs:
 
-1.  Configurable Publisher Registry SDK:
+1.  Telemetry Client SDK: [README](client/README.md)
+2.  Configurable Publisher Registry SDK:
     [README](configurable_publisher_registry/README.md)
