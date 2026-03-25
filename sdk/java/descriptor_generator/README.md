@@ -14,11 +14,12 @@
   limitations under the License.
 -->
 
-# Configurable Publisher Registry Java Middleware
+# Protobuf Descriptor Generator for Java
 
-This directory contains the `sdv_telemetry_descriptor_generator` tool, which
-generates Java code containing a serialized `FileDescriptorSet` protobuf message
-from a source `.proto` file.
+This directory contains the
+`sdv_telemetry_sdk_descriptor_generator_java` tool, which generates
+Java code containing a serialized `FileDescriptorSet` protobuf message from a
+source `.proto` file.
 
 The generated `.java` file can be compiled into a `java_library`. This library
 can then be used as a dependency for a publisher using the Configurable
@@ -26,7 +27,8 @@ Publisher Registry, without needing the full protobuf runtime on the device.
 
 ## Command Line Arguments
 
-The `sdv_telemetry_descriptor_generator` binary accepts the following arguments:
+The `sdv_telemetry_sdk_descriptor_generator_java` binary accepts the
+following arguments:
 
 *  `--proto_file`: (Required) Path to the input `.proto` file.
 *  `--proto_path`: (Required) Specify the directory in which to search for
@@ -53,10 +55,10 @@ step.
 ```android
 genrule {
     name: "example_descriptors_gen",
-    tools: ["sdv_telemetry_descriptor_generator"],
+    tools: ["sdv_telemetry_sdk_descriptor_generator_java"],
     srcs: ["Example.proto"],
     out: ["Example.java"],
-    cmd: "$(location sdv_telemetry_descriptor_generator) " +
+    cmd: "$(location sdv_telemetry_sdk_descriptor_generator_java) " +
         "--proto_file $(location Example.proto) " +
         "--proto_path $$(dirname $(location Example.proto)) " +
         "--message_full_name com.example.ExampleMessage " +

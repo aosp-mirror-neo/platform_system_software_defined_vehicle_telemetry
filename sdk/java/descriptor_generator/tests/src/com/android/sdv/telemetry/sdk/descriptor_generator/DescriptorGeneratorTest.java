@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package google.sdv.telemetry.descriptor_generator;
+package com.android.sdv.telemetry.sdk.descriptor_generator;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -39,7 +39,7 @@ import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
 
 @RunWith(JUnit4.class)
-public final class ProtoDescriptorGeneratorTest {
+public final class DescriptorGeneratorTest {
     @Rule public TemporaryFolder mTempDir = new TemporaryFolder();
 
     private Path getTempDir() {
@@ -77,8 +77,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--message_full_name", "com.google.sdv.telemetry.test.InvalidMessage"
         };
 
-        var thrown =
-                assertThrows(RuntimeException.class, () -> ProtoDescriptorGenerator.main(args));
+        var thrown = assertThrows(RuntimeException.class, () -> DescriptorGenerator.main(args));
         assertThat(thrown)
                 .hasMessageThat()
                 .isEqualTo(
@@ -124,7 +123,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--output_package",
             ""
         };
-        ProtoDescriptorGenerator.main(args);
+        DescriptorGenerator.main(args);
 
         ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
         assertThat(result.messageFullName).isEqualTo(".test.Message1");
@@ -152,8 +151,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--message_full_name", "com.example.NonExistingMessage"
         };
 
-        var thrown =
-                assertThrows(RuntimeException.class, () -> ProtoDescriptorGenerator.main(args));
+        var thrown = assertThrows(RuntimeException.class, () -> DescriptorGenerator.main(args));
         assertThat(thrown)
                 .hasMessageThat()
                 .isEqualTo(
@@ -197,7 +195,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--output_class", "OutputClass",
             "--output_package", ""
         };
-        ProtoDescriptorGenerator.main(args);
+        DescriptorGenerator.main(args);
 
         ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
         assertThat(result.messageFullName).isEqualTo(".test.Message1");
@@ -253,7 +251,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--output_package",
             ""
         };
-        var e = assertThrows(RuntimeException.class, () -> ProtoDescriptorGenerator.main(args));
+        var e = assertThrows(RuntimeException.class, () -> DescriptorGenerator.main(args));
         assertThat(e).hasMessageThat().contains("warning: Import Message2.proto is unused.");
     }
 
@@ -298,7 +296,7 @@ public final class ProtoDescriptorGeneratorTest {
             "--output_package",
             ""
         };
-        ProtoDescriptorGenerator.main(args);
+        DescriptorGenerator.main(args);
 
         ClassParseResult result = parseGeneratedJavaClass(outputFile, "OutputClass");
         assertThat(result.messageFullName).isEqualTo(".test.Message1");

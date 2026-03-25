@@ -18,7 +18,7 @@ syntax = "proto3";
 
 package com.google.sdv.telemetry.test;
 
-// A simple message for testing the ProtoDescriptorGenerator.
+// A simple message for testing the DescriptorGenerator.
 message TestMessage {
   int32 id = 1;
   string name = 2;
