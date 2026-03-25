@@ -21,8 +21,9 @@ import android.os.RemoteException;
 
 import androidx.annotation.VisibleForTesting;
 
+import com.android.sdv.telemetry.sdk.binder_accessor.BinderAccessor;
+
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
-import google.sdv.telemetry.java.Binder.BinderServiceAccessor;
 
 public final class Registry {
     static {
@@ -35,7 +36,7 @@ public final class Registry {
     private final IConfigurablePublisherRegistry mRegistryBinder;
 
     public Registry() throws RemoteException {
-        IBinder binder = BinderServiceAccessor.getService(sServiceName);
+        IBinder binder = BinderAccessor.getService(sServiceName);
         if (binder == null) {
             throw new RemoteException("Binder service '" + sServiceName + "' not found");
         }
