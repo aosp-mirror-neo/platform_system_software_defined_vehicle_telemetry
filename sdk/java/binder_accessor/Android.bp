@@ -33,6 +33,9 @@ cc_library {
     stl: "c++_shared",
 }
 
+// **WARNING**: This part of the SDK is currently considered experimental. We
+// might make **breaking changes** in the future. We are releasing it early to
+// gather feedback. Please report any bugs and suggestions to us.
 java_library {
     name: "libsdv_telemetry_sdk_binder_accessor_java",
     visibility: ["//visibility:public"],

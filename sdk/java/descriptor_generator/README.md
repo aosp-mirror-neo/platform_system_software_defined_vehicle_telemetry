@@ -14,7 +14,11 @@
   limitations under the License.
 -->
 
-# Protobuf Descriptor Generator for Java
+# **EXPERIMENTAL** Protobuf Descriptor Generator for Java
+
+**WARNING**: This part of the SDK is currently considered experimental. We might
+make **breaking changes** in the future. We are releasing it early to gather
+feedback. Please report any bugs and suggestions to us.
 
 This directory contains the
 `sdv_telemetry_sdk_descriptor_generator_java` tool, which generates

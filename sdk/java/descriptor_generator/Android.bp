@@ -18,6 +18,9 @@ package {
     default_visibility: ["//visibility:private"],
 }
 
+// **WARNING**: This part of the SDK is currently considered experimental. We
+// might make **breaking changes** in the future. We are releasing it early to
+// gather feedback. Please report any bugs and suggestions to us.
 java_binary_host {
     name: "sdv_telemetry_sdk_descriptor_generator_java",
     visibility: ["//visibility:public"],
