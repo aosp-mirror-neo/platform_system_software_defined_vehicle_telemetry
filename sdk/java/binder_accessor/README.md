@@ -14,7 +14,11 @@
   limitations under the License.
 -->
 
-# Binder Accessor SDK
+# **EXPERIMENTAL** Binder Accessor SDK
+
+**WARNING**: This part of the SDK is currently considered experimental. We might
+make **breaking changes** in the future. We are releasing it early to gather
+feedback. Please report any bugs and suggestions to us.
 
 This SDK provides a JNI library that allows access to Binder services from Java.
 To use it, specify `libsdv_telemetry_sdk_binder_accessor_java` in your

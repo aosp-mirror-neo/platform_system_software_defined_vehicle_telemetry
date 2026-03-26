@@ -14,11 +14,11 @@
 
 // Generates the Java source file from the test proto
 genrule {
-    name: "sdv_telemetry_descriptor_generator_test_output",
-    tools: ["sdv_telemetry_descriptor_generator"],
+    name: "sdv_mt_telemetry_unit_sdk_descriptor_generator_java_test_gen",
+    tools: ["sdv_telemetry_sdk_descriptor_generator_java"],
     srcs: ["reference_files/TestMessageSchema.proto"],
     out: ["reference_files/TestMessageSchema.java"],
-    cmd: "$(location sdv_telemetry_descriptor_generator) " +
+    cmd: "$(location sdv_telemetry_sdk_descriptor_generator_java) " +
         "--proto_file $(in) " +
         "--proto_path $$(dirname $(in)) " +
         "--output_file $(out) " +
@@ -28,11 +28,11 @@ genrule {
 }
 
 java_test_host {
-    name: "sdv_mt_proto_descriptor_generator_test",
+    name: "sdv_mt_telemetry_unit_sdk_descriptor_generator_java_test",
     srcs: [
         // keep-sorted start
-        ":sdv_telemetry_descriptor_generator_test_output",
-        "src/google/sdv/telemetry/descriptor_generator/ProtoDescriptorGeneratorTest.java",
+        ":sdv_mt_telemetry_unit_sdk_descriptor_generator_java_test_gen",
+        "src/com/android/sdv/telemetry/sdk/descriptor_generator/DescriptorGeneratorTest.java",
         // keep-sorted end
     ],
     data: [
@@ -45,7 +45,7 @@ java_test_host {
         // keep-sorted start
         "junit",
         "libprotobuf-java-full",
-        "sdv_telemetry_descriptor_generator",
+        "sdv_telemetry_sdk_descriptor_generator_java",
         "truth",
         // keep-sorted end
     ],

@@ -45,6 +45,9 @@ rust_defaults {
     ],
 }
 
+// **WARNING**: This part of the SDK is currently considered experimental. We
+// might make **breaking changes** in the future. We are releasing it early to
+// gather feedback. Please report any bugs and suggestions to us.
 rust_library {
     name: "libsdv_telemetry_sdk_configurable_publisher_registry_rust",
     visibility: ["//visibility:public"],

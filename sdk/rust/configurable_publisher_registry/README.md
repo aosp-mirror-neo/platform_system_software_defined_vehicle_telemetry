@@ -14,7 +14,11 @@
   limitations under the License.
 -->
 
-# Configurable Publisher Registry Rust SDK
+# **EXPERIMENTAL** Configurable Publisher Registry Rust SDK
+
+**WARNING**: This part of the SDK is currently considered experimental. We might
+make **breaking changes** in the future. We are releasing it early to gather
+feedback. Please report any bugs and suggestions to us.
 
 The Configurable Publisher Registry Rust SDK provides a framework for creating
 and registering custom Telemetry publishers, which allows you to easily publish

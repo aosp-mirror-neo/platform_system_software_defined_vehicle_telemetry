@@ -22,3 +22,5 @@ provide the following SDKs:
 1.  Configurable Publisher Registry SDK:
     [README](configurable_publisher_registry/README.md)
 2.  Binder Accessor SDK: [README](binder_accessor/README.md)
+3.  Protobuf Descriptor Generator:
+    [README](descriptor_generator/README.md)
