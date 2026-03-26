@@ -47,7 +47,6 @@ rust_defaults {
         "libclap_derive",
         // keep-sorted end
     ],
-    vendor_available: true,
 }
 
 rust_library {
@@ -55,6 +54,8 @@ rust_library {
     visibility: ["//visibility:public"],
     defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     crate_name: "sdv_telemetry_configurable_publisher",
+    product_available: true,
+    vendor_available: true,
     min_sdk_version: "35",
 }
 
@@ -93,6 +94,7 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    system_ext_specific: true,
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,

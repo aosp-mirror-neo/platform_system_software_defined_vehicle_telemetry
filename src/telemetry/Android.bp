@@ -63,7 +63,6 @@ rust_library {
     visibility: ["//system/software_defined_vehicle/telemetry/src/telemetry_service_agent:__subpackages__"],
     defaults: ["libsdv_telemetry_defaults"],
     crate_name: "sdv_telemetry",
-    vendor_available: true,
     rustlibs: [
         // keep-sorted start
         "libsdv_telemetry_expr",
@@ -122,7 +121,9 @@ rust_test {
     test_options: {
         unit_test: true,
     },
-    vendor: true,
+    system_ext_specific: true,
+    vendor_available: false,
+    product_available: false,
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,

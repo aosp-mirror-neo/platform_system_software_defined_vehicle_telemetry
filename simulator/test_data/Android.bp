@@ -31,6 +31,7 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "sdv_telemetry_simulator_test_proto",
+    product_available: true,
     vendor_available: true,
 }
 

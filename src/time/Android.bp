@@ -27,7 +27,6 @@ cc_library {
         "libbase",
         // keep-sorted end
     ],
-    vendor_available: true,
     min_sdk_version: "35",
 }
 
@@ -41,7 +40,6 @@ rust_bindgen {
         "libsdv_telemetry_time",
         // keep-sorted end
     ],
-    vendor_available: true,
     min_sdk_version: "35",
 }
 
@@ -62,6 +60,7 @@ rust_test {
         // keep-sorted end
     ],
     auto_gen_config: true,
+    system_ext_specific: true,
 
     // Disable all lints because the generated code is not guaranteed to be
     // lint-free.
@@ -90,7 +89,6 @@ rust_library {
     visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper",
-    vendor_available: true,
     min_sdk_version: "35",
 }
 
@@ -108,6 +106,7 @@ rust_test {
         // keep-sorted end
     ],
     auto_gen_config: true,
+    system_ext_specific: true,
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,

@@ -53,6 +53,7 @@ rust_library {
     visibility: ["//visibility:public"],
     defaults: ["libsdv_telemetry_sdk_configurable_publisher_registry_rust_defaults"],
     crate_name: "sdv_telemetry_sdk_configurable_publisher_registry",
+    product_available: true,
     vendor_available: true,
 }
 

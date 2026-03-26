@@ -37,7 +37,6 @@ rust_library {
     defaults: ["libsdv_telemetry_platform_abstraction_layer_defaults"],
     crate_name: "sdv_telemetry_platform_abstraction_layer",
     features: [],
-    vendor_available: true,
     min_sdk_version: "35",
 }
 
@@ -54,7 +53,6 @@ rust_library {
         "libmockall",
         // keep-sorted end
     ],
-    vendor_available: true,
 }
 
 rust_test {
@@ -79,6 +77,7 @@ rust_test {
         // keep-sorted end
     ],
     auto_gen_config: true,
+    system_ext_specific: true,
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,

@@ -39,7 +39,6 @@ rust_defaults {
         // keep-sorted end
     ],
     ld_flags: ["-Wl,--no-as-needed"],
-    vendor_available: true,
 }
 
 rust_library {
@@ -90,6 +89,9 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    system_ext_specific: true,
+    vendor_available: false,
+    product_available: false,
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,
