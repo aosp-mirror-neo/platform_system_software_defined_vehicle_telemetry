@@ -371,7 +371,10 @@ mod tests {
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::assert_matches;
     use sdv_telemetry_test_utils::oneshot_callback;
-    use std::{future, sync::Arc};
+    use std::future;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
     use crate::metrics_config_orchestrator::message_builder::MessageBuilderErrorType;
@@ -431,7 +434,6 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    #[should_panic]
     async fn get_latest_message_resets() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
@@ -450,6 +452,10 @@ mod tests {
 
         Arc::clone(&publisher).activate().await;
         trigger.fire().await;
+
+        // Give the message some time to be built and processed.
+        sleep(Duration::from_millis(50)).await;
+
         let msg1 = Arc::clone(&publisher)
             .get_latest_message()
             .unwrap_sync()
@@ -461,7 +467,7 @@ mod tests {
 
         assert!(msg1.is_some());
         assert!(msg2.is_none(), "Unexpected message: {:?}", msg2.unwrap());
-        assert_eq!(message_builder.get_num_reset_calls(), 1);
+        assert_eq!(message_builder.get_num_reset_calls(), 2);
     }
 
     #[sdv_telemetry_test_utils::timeout]
