@@ -26,10 +26,6 @@ import com.android.sdv.telemetry.sdk.binder_accessor.BinderAccessor;
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
 
 public final class Registry {
-    static {
-        System.loadLibrary("binder_accessor");
-    }
-
     private static final String sServiceName =
             "google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry/default";
 
