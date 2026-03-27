@@ -37,7 +37,7 @@ impl ValueAggregator for VectorAggregator {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
         let node_value = node_value.expect("Aggregator should be provided with a value");
         if node_value.is_none() {
-            return Ok(NodeValue::None);
+            return Ok(self.current_vec.clone().unwrap_or(NodeValue::None));
         }
 
         if let Some(existing_vec) = &mut self.current_vec {
@@ -196,6 +196,11 @@ mod tests {
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
         assert_eq!(res, NodeValue::None);
+
+        aggregator.compute(Some(1.into())).unwrap();
+        aggregator.compute(Some(2.into())).unwrap();
+        let res = aggregator.compute(Some(NodeValue::None)).unwrap();
+        assert_eq!(res, NodeValue::Int32List(vec![1, 2]));
     }
 
     #[test]
