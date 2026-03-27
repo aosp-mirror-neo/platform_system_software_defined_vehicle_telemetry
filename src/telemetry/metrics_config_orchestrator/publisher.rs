@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use aggregation::AggregationPublisher;
 use async_trait::async_trait;
 use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
@@ -46,6 +47,8 @@ pub(crate) trait Publisher: DumpStateReporter + Send + Sync {
     fn get_latest_message(
         self: Arc<Self>,
     ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>;
+
+    fn as_aggregation_publisher(&self) -> Option<&AggregationPublisher>;
 
     async fn activate(self: Arc<Self>);
     async fn deactivate(&self);

@@ -94,6 +94,7 @@ mod tests {
             start_trigger: None,
             end_trigger: None,
             finish_trigger: None,
+            retain_aggregations_on_stop: false,
         }
     }
 

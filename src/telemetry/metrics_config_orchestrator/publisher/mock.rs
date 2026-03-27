@@ -66,6 +66,10 @@ impl Publisher for MockPublisher {
         Ok(self.latest_message.clone()).into()
     }
 
+    fn as_aggregation_publisher(&self) -> Option<&super::aggregation::AggregationPublisher> {
+        None
+    }
+
     async fn activate(self: Arc<Self>) {
         if let Some(callback) = &self.activate_callback {
             callback(&self.name)
