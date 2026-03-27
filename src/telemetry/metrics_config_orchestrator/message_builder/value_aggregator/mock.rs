@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use parking_lot::Mutex;
 use sdv_telemetry_expr::node_value::NodeValue;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use crate::metrics_config_orchestrator::message_builder::{
 pub(crate) struct MockValueAggregator {
     fail_compute: Arc<AtomicBool>,
     num_reset_calls: Arc<AtomicU32>,
+    default_value: Arc<Mutex<Option<NodeValue>>>,
 }
 
 impl ValueAggregator for MockValueAggregator {
@@ -42,11 +44,19 @@ impl ValueAggregator for MockValueAggregator {
     fn reset(&mut self) {
         self.num_reset_calls.fetch_add(1, Ordering::AcqRel);
     }
+
+    fn default_value(&self) -> NodeValue {
+        self.default_value.lock().clone().unwrap_or(NodeValue::None)
+    }
 }
 
 impl MockValueAggregator {
     pub(crate) fn new() -> Self {
-        Self { fail_compute: Arc::new(false.into()), num_reset_calls: Arc::new(0.into()) }
+        Self {
+            fail_compute: Arc::new(false.into()),
+            num_reset_calls: Arc::new(0.into()),
+            default_value: Arc::new(Mutex::new(None)),
+        }
     }
 
     pub(crate) fn get_num_reset_calls(&self) -> u32 {
@@ -55,6 +65,11 @@ impl MockValueAggregator {
 
     pub(crate) fn fail_compute(self) -> Self {
         self.fail_compute.store(true, Ordering::Release);
+        self
+    }
+
+    pub(crate) fn set_default_value(self, value: NodeValue) -> Self {
+        self.default_value.lock().replace(value);
         self
     }
 }

@@ -46,6 +46,7 @@ pub(crate) enum AggregationError {
 pub(crate) trait ValueAggregator: Send + Sync {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError>;
     fn reset(&mut self);
+    fn default_value(&self) -> NodeValue;
 }
 
 #[cfg(test)]

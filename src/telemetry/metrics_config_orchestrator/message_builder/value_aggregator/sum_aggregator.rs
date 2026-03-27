@@ -50,6 +50,10 @@ impl ValueAggregator for SumAggregator {
     fn reset(&mut self) {
         self.current_sum = DEFAULT_SUM_VALUE;
     }
+
+    fn default_value(&self) -> NodeValue {
+        DEFAULT_SUM_VALUE
+    }
 }
 
 #[cfg(test)]
@@ -118,5 +122,11 @@ mod tests {
         aggregator.reset();
 
         assert_eq!(aggregator.current_sum, DEFAULT_SUM_VALUE);
+    }
+
+    #[test]
+    fn default_value_zero() {
+        let default_value = SumAggregator::new().default_value();
+        assert_eq!(default_value, NodeValue::Int32(0));
     }
 }

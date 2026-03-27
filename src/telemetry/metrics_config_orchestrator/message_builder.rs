@@ -40,6 +40,9 @@ pub(crate) trait MessageBuilder: Send + Sync {
         context: &Arc<NodeEvaluationContext>,
     ) -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>;
 
+    // Builds a protobuf message with default values provided by value aggregators.
+    fn build_default(&self) -> Box<dyn DynamicMessage>;
+
     /// Resets internal aggregation state of the builder.
     fn reset(&self);
 }
@@ -112,6 +115,15 @@ impl MessageBuilder for MessageBuilderImpl {
                 (None, builder_errors)
             }
         })
+    }
+
+    fn build_default(&self) -> Box<dyn DynamicMessage> {
+        let mut message_values = HashMap::new();
+        let field_assignments = self.field_assignments.lock();
+        for (field_name, field_aggregator) in &*field_assignments {
+            message_values.insert(field_name.to_owned(), field_aggregator.default_value());
+        }
+        Box::new(NodeValueDynamicMessage::new(self.message_descriptor.clone(), message_values))
     }
 
     fn reset(&self) {
@@ -686,5 +698,37 @@ mod tests {
         builder.reset();
 
         assert_eq!(aggregator.get_num_reset_calls(), 1);
+    }
+
+    #[test]
+    fn test_build_default_populates_correct_values() {
+        let aggregator_1 =
+            Box::new(MockValueAggregator::new().set_default_value(NodeValue::Int32(0)));
+        let aggregator_2 = Box::new(MockValueAggregator::new().set_default_value(NodeValue::None));
+        let aggregator_3 =
+            Box::new(MockValueAggregator::new().set_default_value(NodeValue::Float(42.5)));
+
+        let builder = MessageBuilderImpl::new(
+            String::default(),
+            TestMessage::descriptor(),
+            vec![
+                (INT_FIELD_NAME.to_owned(), aggregator_1 as Box<dyn ValueAggregator>),
+                (OPTIONAL_INT64_FIELD_NAME.to_owned(), aggregator_2 as Box<dyn ValueAggregator>),
+                (FLOAT_FIELD_NAME.to_owned(), aggregator_3 as Box<dyn ValueAggregator>),
+            ],
+            vec![],
+        );
+
+        let default_message = builder.build_default();
+
+        // The optional_int64_field remains unset.
+        let mut expected_message = TestMessage::new();
+        expected_message.int_field = 0;
+        expected_message.float_field = 42.5;
+
+        assert_that!(
+            default_message.to_protobuf().unwrap(),
+            msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE)
+        );
     }
 }
