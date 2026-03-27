@@ -20,8 +20,9 @@
 #include <jni.h>
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_android_sdv_telemetry_sdk_binder_accessor_BinderAccessor_getService__Ljava_lang_String_2(
-        JNIEnv* env, jclass /**/, jstring str) {
+Java_com_android_sdv_telemetry_sdk_binder_1accessor_BinderAccessor_getService(JNIEnv* env,
+                                                                              jclass /**/,
+                                                                              jstring str) {
     ALOGI("%s", __func__);
 
     // Best practice is probably libnativehelper ScopedUtfChars or

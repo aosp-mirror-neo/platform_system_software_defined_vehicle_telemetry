@@ -33,12 +33,50 @@ cc_library {
     stl: "c++_shared",
 }
 
+java_defaults {
+    name: "libsdv_ivi_telemetry_unit_sdk_binder_accessor_java_defaults",
+    sdk_version: "system_current",
+}
+
 // **WARNING**: This part of the SDK is currently considered experimental. We
 // might make **breaking changes** in the future. We are releasing it early to
 // gather feedback. Please report any bugs and suggestions to us.
 java_library {
     name: "libsdv_telemetry_sdk_binder_accessor_java",
     visibility: ["//visibility:public"],
-    srcs: ["BinderAccessor.java"],
-    sdk_version: "system_current",
+    defaults: ["libsdv_ivi_telemetry_unit_sdk_binder_accessor_java_defaults"],
+    srcs: ["src/**/*.java"],
+}
+
+android_test {
+    name: "sdv_ivi_telemetry_integration_sdk_binder_accessor_java_test",
+    defaults: ["libsdv_ivi_telemetry_unit_sdk_binder_accessor_java_defaults"],
+    srcs: ["tests/src/**/*.java"],
+    manifest: "tests/AndroidManifest.xml",
+    test_config: "tests/AndroidTest.xml",
+    static_libs: [
+        // keep-sorted start
+        "androidx.core_core",
+        "androidx.test.ext.junit",
+        "androidx.test.runner",
+        "libsdv_telemetry_sdk_binder_accessor_java",
+        "truth",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    jni_libs: [
+        // keep-sorted start
+        "libsdv_telemetry_sdk_binder_accessor_java_jni",
+        // keep-sorted end
+    ],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
 }
