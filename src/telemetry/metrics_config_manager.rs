@@ -612,7 +612,7 @@ mod tests {
     use googletest::matchers::{container_eq, empty, eq, err, pat};
     use lazy_static::lazy_static;
     use protobuf::Message;
-    use rand::prelude::SliceRandom;
+    use rand::seq::SliceRandom;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use sdv_telemetry_test_utils::assert_matches;
