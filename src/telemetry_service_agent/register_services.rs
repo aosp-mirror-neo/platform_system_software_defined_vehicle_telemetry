@@ -24,8 +24,8 @@ use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use std::sync::Arc;
 
 const DEFAULT_METRIC_CONFIG_STORE_SIZE_MB: usize = 1; // 1 MB
-const METRIC_CONFIG_STORE_SIZE_MB_PROPERTY: &str = "ro.vendor.telemetry.metric_config_store_in_mb";
-const ROOT_DIR: &str = "/data/vendor/";
+const METRIC_CONFIG_STORE_SIZE_MB_PROPERTY: &str = "ro.sdv.telemetry.metric_config_store_in_mb";
+const ROOT_DIR: &str = "/data/";
 
 pub async fn register_services(
     service_publisher_manager_impl: Arc<ServicePublisherManager>,

@@ -89,7 +89,6 @@ rust_test {
     auto_gen_config: true,
     // Requires root so the test can perform Binder calls.
     require_root: true,
-    vendor: true,
 }
 
 rust_binary {

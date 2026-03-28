@@ -35,6 +35,7 @@ rust_defaults {
         // keep-sorted end
     ],
     ld_flags: ["-Wl,--no-as-needed"],
+    product_available: true,
     vendor_available: true,
 }
 

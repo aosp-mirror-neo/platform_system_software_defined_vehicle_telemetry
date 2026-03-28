@@ -241,7 +241,9 @@ pub(super) fn create_publisher_in_new_process(
         PublisherType::Rpc => args.extend(["rpc"]),
     }
     eprintln!("Spwaning publisher process with args: {args:?}");
-    let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
+    let mut publisher_path = std::env::current_exe().unwrap();
+    publisher_path.set_file_name("sdv_telemetry_comms_stack_wrapper_test_publisher");
+    let mut child = Command::new(publisher_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         // Print child process errors to the test's stderr.

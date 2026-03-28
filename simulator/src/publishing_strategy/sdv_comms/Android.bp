@@ -47,6 +47,7 @@ rust_defaults {
         "libasync_trait",
         // keep-sorted end
     ],
+    product_available: true,
     vendor_available: true,
 }
 

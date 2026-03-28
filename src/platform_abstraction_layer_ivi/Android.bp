@@ -38,7 +38,6 @@ rust_library {
     visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     defaults: ["libsdv_telemetry_platform_abstraction_layer_ivi_defaults"],
     crate_name: "sdv_telemetry_platform_abstraction_layer_ivi",
-    vendor_available: true,
     min_sdk_version: "35",
 }
 

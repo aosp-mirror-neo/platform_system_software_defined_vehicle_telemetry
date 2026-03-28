@@ -40,6 +40,7 @@ rust_protobuf {
         "test_bool_value_2.proto",
     ],
     source_stem: "sdv_telemetry_test_proto_bool_value",
+    product_available: true,
     vendor_available: true,
 }
 

@@ -66,6 +66,10 @@ message MetricsConfig {
   // Optional.
   // The name of the trigger that deactivates metrics configuration.
   string deactivate_trigger_name = 11;
+
+  // Optional.
+  // Specifies whether the aggregated values are reset (false) or retained (true) on stop trigger.
+  bool retain_aggregations_on_stop = 12;
 }
 
 // Emits trigger events.
