@@ -49,6 +49,10 @@ impl ValueAggregator for AvgAggregator {
         self.current_avg = DEFAULT_AVG_VALUE;
         self.n = 0;
     }
+
+    fn default_value(&self) -> NodeValue {
+        NodeValue::None
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +130,11 @@ mod tests {
 
         assert_eq!(aggregator.current_avg, DEFAULT_AVG_VALUE);
         assert_eq!(aggregator.n, 0);
+    }
+
+    #[test]
+    fn default_value_none() {
+        let default_value = AvgAggregator::new().default_value();
+        assert_eq!(default_value, NodeValue::None);
     }
 }

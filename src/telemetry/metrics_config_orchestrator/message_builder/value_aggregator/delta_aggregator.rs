@@ -62,6 +62,10 @@ impl ValueAggregator for DeltaAggregator {
     fn reset(&mut self) {
         self.previous_value = NodeValue::None;
     }
+
+    fn default_value(&self) -> NodeValue {
+        NodeValue::None
+    }
 }
 
 #[cfg(test)]
@@ -132,5 +136,11 @@ mod tests {
         aggregator.reset();
 
         assert_eq!(aggregator.previous_value, NodeValue::None);
+    }
+
+    #[test]
+    fn default_value_none() {
+        let default_value = DeltaAggregator::new().default_value();
+        assert_eq!(default_value, NodeValue::None);
     }
 }

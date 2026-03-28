@@ -26,6 +26,10 @@ impl ValueAggregator for PassThroughAggregator {
     }
 
     fn reset(&mut self) {}
+
+    fn default_value(&self) -> NodeValue {
+        NodeValue::None
+    }
 }
 
 #[cfg(test)]
@@ -53,5 +57,11 @@ mod tests {
     fn reset_ok() {
         let mut aggregator = PassThroughAggregator {};
         aggregator.reset();
+    }
+
+    #[test]
+    fn default_value_none() {
+        let default_value = PassThroughAggregator {}.default_value();
+        assert_eq!(default_value, NodeValue::None);
     }
 }

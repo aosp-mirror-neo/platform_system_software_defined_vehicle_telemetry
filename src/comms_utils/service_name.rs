@@ -82,7 +82,11 @@ impl fmt::Display for ServiceName {
 mod tests {
     use super::*;
 
-    use googletest::prelude::*;
+    use googletest::assert_that;
+    use googletest::matchers::anything;
+    use googletest::matchers::eq;
+    use googletest::matchers::err;
+    use googletest::matchers::ok;
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::sd::UnitType;
     use sdv_telemetry_test_utils::parameterized_test;

@@ -30,6 +30,7 @@ pub(crate) struct MockMessageBuilder {
         Option<BoxFuture<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>>,
     >,
     num_build_calls: AtomicU32,
+    num_build_default_calls: AtomicU32,
     num_reset_calls: AtomicU32,
     result_callback: Mutex<
         Option<
@@ -72,6 +73,11 @@ impl MessageBuilder for MockMessageBuilder {
         }
     }
 
+    fn build_default(&self) -> Box<dyn DynamicMessage> {
+        self.num_build_default_calls.fetch_add(1, Ordering::AcqRel);
+        Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage { ..Default::default() })))
+    }
+
     fn reset(&self) {
         self.num_reset_calls.fetch_add(1, Ordering::AcqRel);
     }
@@ -83,6 +89,7 @@ impl MockMessageBuilder {
             next_error: None.into(),
             next_async_result: None.into(),
             num_build_calls: 0.into(),
+            num_build_default_calls: 0.into(),
             num_reset_calls: 0.into(),
             result_callback: None.into(),
         }
@@ -94,6 +101,10 @@ impl MockMessageBuilder {
 
     pub(crate) fn get_num_build_calls(&self) -> u32 {
         self.num_build_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn get_num_build_default_calls(&self) -> u32 {
+        self.num_build_default_calls.load(Ordering::Acquire)
     }
 
     pub(crate) fn set_next_error(&self, error: MessageBuilderError) {

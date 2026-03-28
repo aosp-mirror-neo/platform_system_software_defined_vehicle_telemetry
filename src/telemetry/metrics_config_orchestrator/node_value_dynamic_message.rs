@@ -130,7 +130,11 @@ impl NodeValueDynamicMessage {
 mod tests {
     use super::*;
 
-    use googletest::prelude::*;
+    use googletest::assert_that;
+    use googletest::matchers::eq;
+    use googletest::matchers::err;
+    use googletest::matchers::ok;
+    use googletest::matchers::pat;
     use lazy_static::lazy_static;
     use protobuf::well_known_types::any::Any;
     use protobuf::Enum;
